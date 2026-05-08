@@ -27,7 +27,11 @@ Partnerships, acquisitions, hiring, funding rounds, and strategic shifts.
 Emerging trends, opinion pieces, and items that may become significant.
 
 Rules:
-- Each item: 2-3 sentence summary with the source link in markdown format: [Source Name](url)
+- Each item: 2-3 sentence summary with inline citation links in markdown format: [Source Name](url)
+- EVERY bullet point MUST have at least one clickable URL citation. Never cite a source without a link.
+- For RSS items: use the article's Link field as the citation URL
+- For newsletter items: use the most specific article URL from the "Links in newsletter" list that corresponds to the story being summarized. Prefer the original source URL over the newsletter's own URL.
+- If the same story appears in multiple sources, merge into one item citing all sources with their respective URLs
 - Deduplicate: if the same story appears in multiple sources, merge into one item citing all sources
 - Prioritize by significance and novelty
 - Be concise but informative — the reader should understand the key takeaway without clicking through
@@ -60,6 +64,8 @@ def _format_newsletter_content(newsletters: list[dict]) -> str:
         parts.append(f"Subject: {n['subject']}")
         parts.append(f"Date: {n['date']}")
         parts.append(f"Content: {n['body_text']}")
+        if n.get("urls"):
+            parts.append(f"Links in newsletter: {' | '.join(n['urls'])}")
         parts.append("")
     return "\n".join(parts)
 

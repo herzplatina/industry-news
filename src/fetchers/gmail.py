@@ -88,6 +88,47 @@ def _decode_body(payload: dict) -> tuple[str, str]:
     return body_text, body_html
 
 
+import re
+from urllib.parse import urlparse, parse_qs, unquote
+
+
+def _extract_urls(html: str) -> list[str]:
+    """Extract meaningful article URLs from newsletter HTML."""
+    soup = BeautifulSoup(html, "html.parser")
+    urls = []
+    seen = set()
+
+    for a in soup.find_all("a", href=True):
+        url = a["href"]
+
+        # Unwrap Substack/Beehiiv redirect wrappers
+        if "substack.com/redirect" in url or "t.co/" in url:
+            parsed = urlparse(url)
+            qs = parse_qs(parsed.query)
+            if "url" in qs:
+                url = unquote(qs["url"][0])
+
+        # Skip non-article URLs
+        if any(skip in url for skip in [
+            "unsubscribe", "manage-preferences", "email-settings",
+            "mailto:", "javascript:", "#", "beacon", "pixel",
+            "list-manage.com", "mailchimp.com",
+        ]):
+            continue
+
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            continue
+        if not parsed.netloc:
+            continue
+
+        if url not in seen:
+            seen.add(url)
+            urls.append(url)
+
+    return urls[:30]
+
+
 def _truncate(text: str, max_chars: int = 2000) -> str:
     if len(text) <= max_chars:
         return text
@@ -115,11 +156,14 @@ def fetch_gmail_newsletters(hours: int = 24) -> list[dict]:
             if body_html and not body_text:
                 body_text = BeautifulSoup(body_html, "html.parser").get_text(separator=" ", strip=True)
 
+            urls = _extract_urls(body_html) if body_html else []
+
             newsletters.append({
                 "subject": headers.get("subject", "No Subject"),
                 "sender": headers.get("from", "Unknown"),
                 "date": headers.get("date", "Unknown"),
                 "body_text": _truncate(body_text),
+                "urls": urls,
             })
     except Exception:
         logger.exception("Failed to fetch Gmail newsletters")
