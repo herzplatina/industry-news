@@ -48,10 +48,12 @@ def _format_rss_content(rss_articles: dict[str, list[dict]]) -> str:
         parts.append(f"=== RSS: {company.upper()} ===")
         for a in articles:
             parts.append(f"Title: {a['title']}")
+            if a.get("category"):
+                parts.append(f"Category: {a['category']}")
             parts.append(f"Link: {a['link']}")
             parts.append(f"Source: {a['source_label']}")
             parts.append(f"Published: {a['published']}")
-            if a["summary"]:
+            if a.get("summary"):
                 parts.append(f"Summary: {a['summary']}")
             parts.append("")
     return "\n".join(parts)

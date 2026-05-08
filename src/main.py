@@ -56,14 +56,16 @@ def run_digest(hours: int = 24, dry_run: bool = False, rss_only: bool = False, s
             print(f"[Email] {n['subject']} — from {n['sender']}")
         return
 
-    # Build raw sources string for debugging — full content as sent to Claude
+    # Build raw sources appendix for the email
     raw_parts = []
     for company, articles in rss_articles.items():
-        raw_parts.append(f"=== RSS: {company.upper()} ===")
+        raw_parts.append(f"### RSS: {company.upper()}")
         for a in articles:
-            raw_parts.append(f"Title: {a['title']}\nLink: {a['link']}\nPublished: {a['published']}\nSummary: {a.get('summary', '')}\n")
+            category = f" [{a['category']}]" if a.get("category") else ""
+            raw_parts.append(f"**{a['title']}**{category}\nLink: {a['link']}\nPublished: {a['published']}\nSummary: {a.get('summary', '')}\n")
     for n in newsletters:
-        raw_parts.append(f"=== NEWSLETTER: {n['sender']} ===\nSubject: {n['subject']}\nDate: {n['date']}\nContent:\n{n['body_text']}\n")
+        raw_parts.append(f"### NEWSLETTER: {n['sender']}")
+        raw_parts.append(f"**{n['subject']}**\nDate: {n['date']}\nContent:\n{n['body_text']}\n")
     raw_sources = "\n".join(raw_parts)
 
     # Summarize

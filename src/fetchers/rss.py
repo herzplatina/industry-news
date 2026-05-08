@@ -51,21 +51,71 @@ def _fetch_rss_feed(url: str, label: str, cutoff: datetime) -> list[dict]:
             published = _parse_entry_time(entry)
             if published and published < cutoff:
                 continue
+            if not published:
+                continue
+
+            raw_title = getattr(entry, "title", "Untitled")
+            date_str, category, clean_title = _parse_scraped_title(raw_title)
 
             summary_raw = getattr(entry, "summary", "") or getattr(entry, "description", "") or ""
             articles.append({
-                "title": getattr(entry, "title", "Untitled"),
+                "title": clean_title or raw_title,
                 "link": getattr(entry, "link", ""),
                 "summary": _truncate(_strip_html(summary_raw)),
                 "source_label": label,
-                "published": published.isoformat() if published else "unknown",
+                "published": published.isoformat(),
+                "category": category,
             })
     except Exception:
         logger.exception("Failed to fetch feed: %s (%s)", label, url)
     return articles
 
 
-def _scrape_blog_page(url: str, label: str, max_articles: int = 10) -> list[dict]:
+import re
+
+_DATE_PATTERN = re.compile(
+    r"((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4})"
+)
+
+_KNOWN_CATEGORIES = sorted([
+    "Cross-Industry", "Societal Impacts", "Societal Impact",
+    "AI Agents", "AI Agent", "AI Assistant",
+    "Policy", "Research", "Productivity", "Product", "Government", "Alignment",
+    "Technology", "Sales", "Engineering",
+    "Safety", "Announcements", "Announcement", "Company",
+    "Enterprise", "Security", "Customers", "Customer",
+], key=len, reverse=True)
+
+
+def _parse_scraped_title(raw_title: str) -> tuple[str, str, str]:
+    """Parse a scraped title into (date, category, clean_title)."""
+    text = raw_title.strip()
+    date = ""
+    categories = []
+
+    # Extract date (could be at start or middle)
+    date_match = _DATE_PATTERN.search(text)
+    if date_match:
+        date = date_match.group(1)
+        text = text[:date_match.start()] + text[date_match.end():]
+        text = text.strip()
+
+    # Strip known category words from the front (they can be concatenated)
+    changed = True
+    while changed:
+        changed = False
+        for cat in _KNOWN_CATEGORIES:
+            if text.startswith(cat):
+                categories.append(cat)
+                text = text[len(cat):].strip()
+                changed = True
+                break
+
+    category = ", ".join(categories) if categories else ""
+    return date, category, text
+
+
+def _scrape_blog_page(url: str, label: str, cutoff: datetime, max_articles: int = 10) -> list[dict]:
     """Scrape the most recent article titles and links from a blog index page."""
     articles = []
     try:
@@ -87,16 +137,62 @@ def _scrape_blog_page(url: str, label: str, max_articles: int = 10) -> list[dict
                 continue
             seen_links.add(full_url)
 
-            title = a_tag.get_text(strip=True)
-            if not title or len(title) < 10:
+            # Get full text for date/category parsing
+            full_text = a_tag.get_text(strip=True)
+            if not full_text or len(full_text) < 10:
                 continue
 
+            # Parse date and category from full text
+            date_str, category, _ = _parse_scraped_title(full_text)
+
+            # Use heading for clean title if available, otherwise parse from full text
+            heading = a_tag.find(["h1", "h2", "h3", "h4", "h5", "h6"])
+            if heading:
+                clean_title = heading.get_text(strip=True)
+            else:
+                _, _, clean_title = _parse_scraped_title(full_text)
+
+            # Only include articles with a parseable date within the cutoff
+            if not date_str:
+                continue
+            try:
+                parsed_date = datetime.strptime(date_str, "%B %d, %Y").replace(tzinfo=timezone.utc)
+                if parsed_date < cutoff:
+                    continue
+            except ValueError:
+                continue
+
+            # Split title from trailing description blurb
+            # Use the URL slug to determine approximate title length
+            slug = full_url.rstrip("/").split("/")[-1]
+            slug_words = len(slug.replace("-", " ").split())
+
+            title = clean_title
+            summary = ""
+            if len(clean_title) > 80:
+                # Use slug word count as hint: title is roughly that many words
+                words = clean_title.split()
+                if slug_words >= 3 and slug_words < len(words):
+                    title = " ".join(words[:slug_words + 2])
+                    summary = " ".join(words[slug_words + 2:])
+                else:
+                    for sep in [". ", "—", " - "]:
+                        idx = clean_title.find(sep, 20)
+                        if 20 < idx < 150:
+                            title = clean_title[:idx].rstrip(".")
+                            summary = clean_title[idx + len(sep):]
+                            break
+                    else:
+                        title = clean_title[:80].rsplit(" ", 1)[0]
+                        summary = clean_title[len(title):].strip()
+
             articles.append({
-                "title": _truncate(title, 200),
+                "title": title,
                 "link": full_url,
-                "summary": "",
+                "summary": _truncate(summary, 500),
                 "source_label": label,
-                "published": "unknown",
+                "published": date_str,
+                "category": category,
             })
     except Exception:
         logger.exception("Failed to scrape blog: %s (%s)", label, url)
@@ -119,7 +215,7 @@ def fetch_rss_articles(hours: int = 24) -> dict[str, list[dict]]:
     for company, pages in config.get("scrape", {}).items():
         articles = []
         for page_info in pages:
-            articles.extend(_scrape_blog_page(page_info["url"], page_info["label"]))
+            articles.extend(_scrape_blog_page(page_info["url"], page_info["label"], cutoff))
             time.sleep(0.5)
         if articles:
             results[company] = articles
