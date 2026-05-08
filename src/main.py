@@ -3,6 +3,7 @@ import logging
 import sys
 import time
 
+import anthropic
 from dotenv import load_dotenv
 
 from src.fetchers.rss import fetch_rss_articles
@@ -56,6 +57,33 @@ def run_digest(hours: int = 24, dry_run: bool = False, rss_only: bool = False, s
             print(f"[Email] {n['subject']} — from {n['sender']}")
         return
 
+    # Summarize each newsletter individually for the raw sources section
+    logger.info("Summarizing %d newsletters individually...", len(newsletters))
+    client = anthropic.Anthropic()
+    newsletter_summaries = {}
+    for n in newsletters:
+        try:
+            resp = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=1500,
+                messages=[{
+                    "role": "user",
+                    "content": (
+                        f"Summarize this newsletter in approximately 1000 words. "
+                        f"Preserve all key facts, names, numbers, and conclusions. "
+                        f"Write in plain prose, no bullet points.\n\n"
+                        f"Subject: {n['subject']}\n"
+                        f"From: {n['sender']}\n\n"
+                        f"{n['body_text']}"
+                    ),
+                }],
+            )
+            newsletter_summaries[n['subject']] = resp.content[0].text
+        except Exception:
+            logger.warning("Failed to summarize newsletter: %s", n['subject'])
+            newsletter_summaries[n['subject']] = n['body_text'][:2000]
+    logger.info("Newsletter summaries complete")
+
     # Build raw sources appendix for the email (proper markdown)
     raw_parts = []
     for company, articles in rss_articles.items():
@@ -72,7 +100,7 @@ def run_digest(hours: int = 24, dry_run: bool = False, rss_only: bool = False, s
         raw_parts.append(f"### NEWSLETTER: {n['sender']}\n")
         raw_parts.append(f"**{n['subject']}**  ")
         raw_parts.append(f"Date: {n['date']}  ")
-        raw_parts.append(f"Content: {n['body_text']}")
+        raw_parts.append(f"\n{newsletter_summaries.get(n['subject'], n['body_text'][:2000])}")
         raw_parts.append("")
     raw_sources = "\n".join(raw_parts)
 
