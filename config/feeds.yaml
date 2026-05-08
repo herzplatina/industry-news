@@ -28,6 +28,9 @@ feeds:
   microsoft:
     - url: "https://blogs.microsoft.com/ai/feed/"
       label: "Microsoft AI"
+  sequoia:
+    - url: "https://sequoiacap.com/feed/"
+      label: "Sequoia Capital"
 
 # Blog pages without native RSS feeds — fetched via HTML scraping
 scrape:
@@ -43,3 +46,8 @@ scrape:
   scale_ai:
     - url: "https://scale.com/blog"
       label: "Scale AI Blog"
+  a16z:
+    - url: "https://a16z.com/news-content/"
+      label: "a16z Blog"
+      path_match: "a16z.com/"
+      min_title_length: 30

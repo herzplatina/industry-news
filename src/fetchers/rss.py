@@ -133,7 +133,7 @@ def _fetch_rss_feed(url: str, label: str, cutoff: datetime, prev_links: set) -> 
     return articles
 
 
-def _scrape_blog_page(url: str, label: str, cutoff: datetime, prev_links: set, max_articles: int = 10) -> list[dict]:
+def _scrape_blog_page(url: str, label: str, cutoff: datetime, prev_links: set, max_articles: int = 10, path_match: str = "/blog/", min_title_length: int = 5) -> list[dict]:
     """Scrape blog page for articles.
 
     - If a date is parsed and it's within the cutoff: include it.
@@ -154,7 +154,7 @@ def _scrape_blog_page(url: str, label: str, cutoff: datetime, prev_links: set, m
             href = a_tag["href"].split("?")[0]
             full_url = urljoin(url, href)
 
-            if "/blog/" not in full_url or full_url.rstrip("/") == url.rstrip("/"):
+            if path_match not in full_url or full_url.rstrip("/") == url.rstrip("/"):
                 continue
             if full_url in seen_links:
                 continue
@@ -174,7 +174,7 @@ def _scrape_blog_page(url: str, label: str, cutoff: datetime, prev_links: set, m
             else:
                 _, _, clean_title = _parse_scraped_title(full_text)
 
-            if not clean_title or len(clean_title) < 5:
+            if not clean_title or len(clean_title) < min_title_length:
                 continue
 
             # Date-based filtering
@@ -247,7 +247,9 @@ def fetch_rss_articles(hours: int = 24) -> dict[str, list[dict]]:
     for company, pages in config.get("scrape", {}).items():
         articles = []
         for page_info in pages:
-            articles.extend(_scrape_blog_page(page_info["url"], page_info["label"], cutoff, prev_links))
+            path_match = page_info.get("path_match", "/blog/")
+            min_title_length = page_info.get("min_title_length", 5)
+            articles.extend(_scrape_blog_page(page_info["url"], page_info["label"], cutoff, prev_links, path_match=path_match, min_title_length=min_title_length))
             time.sleep(0.5)
         if articles:
             results[company] = articles
