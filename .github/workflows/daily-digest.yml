@@ -37,7 +37,7 @@ jobs:
           GMAIL_SENDER_EMAIL: ${{ secrets.GMAIL_SENDER_EMAIL }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           DIGEST_RECIPIENT_EMAIL: ${{ secrets.DIGEST_RECIPIENT_EMAIL }}
-        run: python -m src.main --hours 24
+        run: python -m src.main --hours 36
 
       - name: Save checkpoint
         uses: actions/cache/save@v4
