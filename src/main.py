@@ -66,11 +66,11 @@ def run_digest(hours: int = 24, dry_run: bool = False, rss_only: bool = False, s
         try:
             resp = client.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=1000,
+                max_tokens=600,
                 messages=[{
                     "role": "user",
                     "content": (
-                        f"Summarize this newsletter in approximately 500 words. "
+                        f"Summarize this newsletter in approximately 300 words. "
                         f"Preserve all key facts, names, numbers, and conclusions. "
                         f"Write in plain prose, no bullet points.\n\n"
                         f"Subject: {n['subject']}\n"

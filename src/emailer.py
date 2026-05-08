@@ -2,7 +2,7 @@ import logging
 import os
 import smtplib
 import sys
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
@@ -48,7 +48,9 @@ def send_digest(markdown_content: str, dry_run: bool = False, raw_sources: str |
     password = os.environ["GMAIL_APP_PASSWORD"]
     recipient = os.environ["DIGEST_RECIPIENT_EMAIL"]
 
-    subject = f"Industry News Digest — {datetime.now().strftime('%b %d, %Y')}"
+    pt = timezone(timedelta(hours=-7))
+    now_pt = datetime.now(pt)
+    subject = f"Industry News Digest — {now_pt.strftime('%b %d, %Y %I:%M %p')} PT"
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
@@ -86,7 +88,9 @@ def send_twitter_digest(markdown_content: str, dry_run: bool = False, raw_source
     password = os.environ["GMAIL_APP_PASSWORD"]
     recipient = os.environ["DIGEST_RECIPIENT_EMAIL"]
 
-    subject = f"Twitter Digest — {datetime.now().strftime('%b %d, %Y')}"
+    pt = timezone(timedelta(hours=-7))
+    now_pt = datetime.now(pt)
+    subject = f"Twitter Digest — {now_pt.strftime('%b %d, %Y %I:%M %p')} PT"
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
