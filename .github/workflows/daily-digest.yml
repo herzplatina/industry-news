@@ -39,6 +39,7 @@ jobs:
           GMAIL_SENDER_EMAIL: ${{ secrets.GMAIL_SENDER_EMAIL }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           DIGEST_RECIPIENT_EMAIL: ${{ secrets.DIGEST_RECIPIENT_EMAIL }}
+          TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
         run: python -m src.main --hours 36
 
       - name: Save checkpoint
@@ -48,10 +49,12 @@ jobs:
           path: data/checkpoint.json
           key: digest-checkpoint-${{ github.run_id }}
 
-      - name: Upload digest artifact
+      - name: Upload digest artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: digest-preview
-          path: digest_preview.html
+          name: digest-previews
+          path: |
+            digest_preview.html
+            twitter_digest_preview.html
           retention-days: 7

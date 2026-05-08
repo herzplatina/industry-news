@@ -66,6 +66,44 @@ def send_digest(markdown_content: str, dry_run: bool = False, raw_sources: str |
     return True
 
 
+def send_twitter_digest(markdown_content: str, dry_run: bool = False, raw_sources: str | None = None) -> bool:
+    load_dotenv()
+
+    full_markdown = markdown_content
+    if raw_sources:
+        full_markdown += "\n\n---\n\n# Raw Sources\n\n" + raw_sources
+
+    html = _render_html(full_markdown)
+
+    output_path = Path("twitter_digest_preview.html")
+    output_path.write_text(html)
+
+    if dry_run:
+        logger.info("Dry run: Twitter digest HTML written to %s", output_path)
+        return True
+
+    sender = os.environ["GMAIL_SENDER_EMAIL"]
+    password = os.environ["GMAIL_APP_PASSWORD"]
+    recipient = os.environ["DIGEST_RECIPIENT_EMAIL"]
+
+    subject = f"Twitter Digest — {datetime.now().strftime('%b %d, %Y')}"
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = sender
+    msg["To"] = recipient
+    msg.attach(MIMEText(full_markdown, "plain"))
+    msg.attach(MIMEText(html, "html"))
+
+    with smtplib.SMTP("smtp.gmail.com", 587) as server:
+        server.starttls()
+        server.login(sender, password)
+        server.send_message(msg)
+
+    logger.info("Twitter digest sent to %s", recipient)
+    return True
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 

@@ -8,8 +8,9 @@ from dotenv import load_dotenv
 
 from src.fetchers.rss import fetch_rss_articles
 from src.fetchers.gmail import fetch_gmail_newsletters
+from src.fetchers.twitter import fetch_tweets
 from src.summarizer import summarize_content
-from src.emailer import send_digest
+from src.emailer import send_digest, send_twitter_digest
 
 logger = logging.getLogger(__name__)
 
@@ -121,12 +122,81 @@ def run_digest(hours: int = 24, dry_run: bool = False, rss_only: bool = False, s
     logger.info("Done.")
 
 
+def run_twitter_digest(hours: int = 36, dry_run: bool = False):
+    load_dotenv()
+
+    logger.info("Fetching tweets...")
+    start = time.time()
+    try:
+        tweets = fetch_tweets(hours=hours)
+        logger.info("Twitter: %d tweets (%.1fs)", len(tweets), time.time() - start)
+    except Exception:
+        logger.exception("Twitter fetcher failed")
+        return
+
+    if not tweets:
+        logger.info("No tweets found. Skipping Twitter digest.")
+        return
+
+    # Summarize tweets with Claude
+    client = anthropic.Anthropic()
+    tweet_text = "\n\n".join(
+        f"@{t['handle']} ({t['likes']} likes, {t['retweets']} RTs)\n"
+        f"{t['text']}\n"
+        f"Link: {t['url']}"
+        for t in tweets
+    )
+
+    logger.info("Summarizing %d tweets with Claude...", len(tweets))
+    start = time.time()
+    response = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=4096,
+        system=[{
+            "type": "text",
+            "text": (
+                "You are an expert tech industry analyst. Given tweets from AI/tech leaders, "
+                "produce a concise digest highlighting the most interesting and significant posts. "
+                "Group by theme, not by person. Each item: 1-2 sentence summary with the tweet link. "
+                "Deduplicate related tweets. Prioritize by significance and engagement. "
+                "Format in markdown with section headers. Include the tweeter's handle in each item."
+            ),
+            "cache_control": {"type": "ephemeral"},
+        }],
+        messages=[{
+            "role": "user",
+            "content": f"# Tweets from the past {hours} hours\n\n{tweet_text}\n\nProduce today's Twitter digest.",
+        }],
+    )
+    digest_markdown = response.content[0].text
+    logger.info("Twitter summarization complete (%.1fs)", time.time() - start)
+
+    # Build raw tweets section
+    raw_parts = ["### Raw Tweets\n"]
+    for t in tweets:
+        raw_parts.append(f"**@{t['handle']}** ({t['likes']} likes, {t['retweets']} RTs)  ")
+        raw_parts.append(f"{t['text']}  ")
+        raw_parts.append(f"Link: {t['url']}")
+        raw_parts.append("")
+    raw_sources = "\n".join(raw_parts)
+
+    if dry_run:
+        print("\n" + digest_markdown)
+        send_twitter_digest(digest_markdown, dry_run=True, raw_sources=raw_sources)
+        return
+
+    logger.info("Sending Twitter digest email...")
+    send_twitter_digest(digest_markdown, raw_sources=raw_sources)
+    logger.info("Twitter digest done.")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Industry News Digest")
     parser.add_argument("--dry-run", action="store_true", help="Print digest without sending email")
-    parser.add_argument("--hours", type=int, default=24, help="Time window in hours (default: 24)")
+    parser.add_argument("--hours", type=int, default=36, help="Time window in hours (default: 36)")
     parser.add_argument("--rss-only", action="store_true", help="Skip Gmail fetcher")
     parser.add_argument("--skip-summarize", action="store_true", help="Print raw items without summarizing")
+    parser.add_argument("--skip-twitter", action="store_true", help="Skip Twitter digest")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -145,6 +215,12 @@ def main():
     except Exception:
         logger.exception("Digest pipeline failed")
         sys.exit(1)
+
+    if not args.skip_twitter:
+        try:
+            run_twitter_digest(hours=args.hours, dry_run=args.dry_run)
+        except Exception:
+            logger.exception("Twitter digest failed")
 
 
 if __name__ == "__main__":
