@@ -64,31 +64,45 @@ def run_digest(hours: int = 24, dry_run: bool = False, rss_only: bool = False, s
             print(f"[Email] {n['subject']} — from {n['sender']}")
         return
 
-    # Summarize each newsletter individually for the raw sources section
-    logger.info("Summarizing %d newsletters individually...", len(newsletters))
+    # Summarize each newsletter individually via Batch API
+    logger.info("Summarizing %d newsletters individually via batch...", len(newsletters))
     client = anthropic.Anthropic()
     newsletter_summaries = {}
-    for n in newsletters:
-        try:
-            resp = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=600,
-                messages=[{
-                    "role": "user",
-                    "content": (
-                        f"Summarize this newsletter in approximately 300 words. "
-                        f"Preserve all key facts, names, numbers, and conclusions. "
-                        f"Write in plain prose, no bullet points.\n\n"
-                        f"Subject: {n['subject']}\n"
-                        f"From: {n['sender']}\n\n"
-                        f"{n['body_text']}"
-                    ),
-                }],
-            )
-            newsletter_summaries[n['subject']] = resp.content[0].text
-        except Exception:
-            logger.warning("Failed to summarize newsletter: %s", n['subject'])
-            newsletter_summaries[n['subject']] = n['body_text'][:2000]
+    if newsletters:
+        batch_requests = []
+        for i, n in enumerate(newsletters):
+            batch_requests.append({
+                "custom_id": f"newsletter-{i}",
+                "params": {
+                    "model": "claude-haiku-4-5-20251001",
+                    "max_tokens": 400,
+                    "messages": [{
+                        "role": "user",
+                        "content": (
+                            f"Summarize this newsletter in approximately 200 words. "
+                            f"Preserve all key facts, names, numbers, and conclusions. "
+                            f"Write in plain prose, no bullet points.\n\n"
+                            f"Subject: {n['subject']}\n"
+                            f"From: {n['sender']}\n\n"
+                            f"{n['body_text']}"
+                        ),
+                    }],
+                },
+            })
+        batch = client.messages.batches.create(requests=batch_requests)
+        logger.info("Newsletter batch created: %s", batch.id)
+        while batch.processing_status != "ended":
+            time.sleep(5)
+            batch = client.messages.batches.retrieve(batch.id)
+        # Collect results
+        for result in client.messages.batches.results(batch.id):
+            idx = int(result.custom_id.split("-")[1])
+            subject = newsletters[idx]['subject']
+            if result.result.type == "succeeded":
+                newsletter_summaries[subject] = result.result.message.content[0].text
+            else:
+                logger.warning("Failed to summarize newsletter: %s", subject)
+                newsletter_summaries[subject] = newsletters[idx]['body_text'][:2000]
     logger.info("Newsletter summaries complete")
 
     # Build raw sources appendix for the email (proper markdown)

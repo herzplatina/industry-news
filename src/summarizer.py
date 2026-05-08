@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 from pathlib import Path
 
 import anthropic
@@ -39,7 +40,7 @@ Rules:
 - Write in a professional, neutral tone
 """
 
-MODEL = "claude-sonnet-4-6"
+MODEL = "claude-haiku-4-5-20251001"
 
 
 def _format_rss_content(rss_articles: dict[str, list[dict]]) -> str:
@@ -90,29 +91,32 @@ def summarize_content(
     user_content = "\n\n---\n\n".join(user_parts)
     user_content += "\n\nPlease produce today's industry news digest based on the above content."
 
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=4096,
-        system=[
-            {
-                "type": "text",
-                "text": SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ],
-        messages=[{"role": "user", "content": user_content}],
-    )
+    batch = client.messages.batches.create(requests=[{
+        "custom_id": "digest",
+        "params": {
+            "model": MODEL,
+            "max_tokens": 4096,
+            "system": SYSTEM_PROMPT,
+            "messages": [{"role": "user", "content": user_content}],
+        },
+    }])
+    logger.info("Digest batch created: %s", batch.id)
 
-    usage = response.usage
-    logger.info(
-        "Token usage — input: %d, output: %d, cache_creation: %s, cache_read: %s",
-        usage.input_tokens,
-        usage.output_tokens,
-        getattr(usage, "cache_creation_input_tokens", "n/a"),
-        getattr(usage, "cache_read_input_tokens", "n/a"),
-    )
+    while batch.processing_status != "ended":
+        time.sleep(5)
+        batch = client.messages.batches.retrieve(batch.id)
 
-    return response.content[0].text
+    for result in client.messages.batches.results(batch.id):
+        if result.result.type == "succeeded":
+            msg = result.result.message
+            logger.info(
+                "Token usage — input: %d, output: %d",
+                msg.usage.input_tokens,
+                msg.usage.output_tokens,
+            )
+            return msg.content[0].text
+
+    raise RuntimeError("Digest batch failed")
 
 
 if __name__ == "__main__":
