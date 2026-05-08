@@ -29,7 +29,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: data/checkpoint.json
-          key: digest-checkpoint
+          key: digest-checkpoint-
+          restore-keys: |
+            digest-checkpoint-
 
       - name: Run digest
         env:
