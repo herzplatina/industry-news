@@ -6,11 +6,87 @@ from pathlib import Path
 import requests
 import yaml
 from dotenv import load_dotenv
+from html.parser import HTMLParser
 
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "twitter.yaml"
 BASE_URL = "https://api.twitter.com/2"
+
+
+class _TitleParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self._in_title = False
+        self.title = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "title":
+            self._in_title = True
+
+    def handle_data(self, data):
+        if self._in_title:
+            self.title = data.strip()
+            self._in_title = False
+
+
+_OG_TITLE_RE = __import__("re").compile(
+    r'<meta[^>]*property=["\']og:title["\'][^>]*content=["\']([^"\']+)["\']'
+    r'|<meta[^>]*content=["\']([^"\']+)["\'][^>]*property=["\']og:title["\']'
+)
+
+
+def _fetch_page_title(url: str) -> str | None:
+    """Fetch page title from a URL via <title> tag or og:title meta."""
+    try:
+        resp = requests.get(
+            url, timeout=5,
+            headers={"User-Agent": "Twitterbot/1.0"},
+            allow_redirects=True,
+        )
+        resp.raise_for_status()
+        html = resp.text[:20000]
+        # Try og:title first (works better for JS-rendered sites)
+        og_match = _OG_TITLE_RE.search(html)
+        if og_match:
+            title = og_match.group(1) or og_match.group(2)
+            if title:
+                import html as html_mod
+                title = html_mod.unescape(title).strip()
+                if len(title) > 120:
+                    title = title[:117] + "..."
+                return title
+        # Fall back to <title> tag
+        parser = _TitleParser()
+        parser.feed(html)
+        title = parser.title
+        if title and len(title) > 120:
+            title = title[:117] + "..."
+        return title
+    except Exception:
+        return None
+
+
+def _unfurl_tweet_text(text: str, entities: dict) -> str:
+    """Replace t.co links with [Title](expanded_url) using Twitter entities and page scraping."""
+    urls = entities.get("urls", [])
+    if not urls:
+        return text
+    for url_entity in urls:
+        tco_url = url_entity["url"]
+        expanded = url_entity.get("expanded_url", tco_url)
+        if tco_url not in text:
+            continue
+        # Skip media links (photos/videos) — just remove the t.co link
+        if url_entity.get("media_key") or "pic.x.com" in url_entity.get("display_url", ""):
+            text = text.replace(tco_url, "")
+            continue
+        title = _fetch_page_title(expanded)
+        if title:
+            text = text.replace(tco_url, f"\n> *[{title}]({expanded})*")
+        else:
+            text = text.replace(tco_url, expanded)
+    return text.strip()
 
 
 def _load_accounts() -> list[str]:
@@ -56,9 +132,10 @@ def _get_tweets(user_id: str, handle: str, since: datetime, headers: dict) -> li
 
     tweets = []
     for tweet in resp.json().get("data", []):
+        entities = tweet.get("entities", {})
         tweets.append({
             "handle": handle,
-            "text": tweet["text"],
+            "text": _unfurl_tweet_text(tweet["text"], entities),
             "created_at": tweet["created_at"],
             "likes": tweet.get("public_metrics", {}).get("like_count", 0),
             "retweets": tweet.get("public_metrics", {}).get("retweet_count", 0),
