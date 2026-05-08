@@ -129,7 +129,22 @@ def _extract_urls(html: str) -> list[str]:
     return urls[:30]
 
 
-def _truncate(text: str, max_chars: int = 2000) -> str:
+_BOILERPLATE_PATTERNS = re.compile(
+    r"^View this post on the web at https?://\S+\s*",
+    re.MULTILINE,
+)
+
+
+def _clean_body(text: str) -> str:
+    """Remove email boilerplate and clean up newsletter body text."""
+    # Strip Substack/Beehiiv "view on web" header
+    text = _BOILERPLATE_PATTERNS.sub("", text).strip()
+    # Strip long redirect URLs inline (they add noise without value)
+    text = re.sub(r"\[\s*https://substack\.com/redirect/\S+\s*\]", "", text)
+    return text
+
+
+def _truncate(text: str, max_chars: int = 5000) -> str:
     if len(text) <= max_chars:
         return text
     return text[:max_chars] + "..."
@@ -162,7 +177,7 @@ def fetch_gmail_newsletters(hours: int = 24) -> list[dict]:
                 "subject": headers.get("subject", "No Subject"),
                 "sender": headers.get("from", "Unknown"),
                 "date": headers.get("date", "Unknown"),
-                "body_text": _truncate(body_text),
+                "body_text": _truncate(_clean_body(body_text)),
                 "urls": urls,
             })
     except Exception:
