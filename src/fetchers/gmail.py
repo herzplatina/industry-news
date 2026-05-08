@@ -150,19 +150,25 @@ def _truncate(text: str, max_chars: int = 5000) -> str:
     return text[:max_chars] + "..."
 
 
-def fetch_gmail_newsletters(hours: int = 24) -> list[dict]:
+def fetch_gmail_newsletters(hours: int = 24, prev_message_ids: set | None = None) -> list[dict]:
     senders = _load_senders()
     service = _get_gmail_service()
     query = _build_query(senders, hours)
     logger.info("Gmail query: %s", query)
 
+    if prev_message_ids is None:
+        prev_message_ids = set()
+
     newsletters = []
+    fetched_ids = []
     try:
         response = service.users().messages().list(userId="me", q=query, maxResults=50).execute()
         message_ids = [m["id"] for m in response.get("messages", [])]
         logger.info("Found %d messages matching query", len(message_ids))
 
         for msg_id in message_ids:
+            if msg_id in prev_message_ids:
+                continue
             msg = service.users().messages().get(userId="me", id=msg_id, format="full").execute()
             headers = {h["name"].lower(): h["value"] for h in msg["payload"].get("headers", [])}
 
@@ -175,16 +181,18 @@ def fetch_gmail_newsletters(hours: int = 24) -> list[dict]:
 
             cleaned = _clean_body(body_text)
             newsletters.append({
+                "message_id": msg_id,
                 "subject": headers.get("subject", "No Subject"),
                 "sender": headers.get("from", "Unknown"),
                 "date": headers.get("date", "Unknown"),
                 "body_text": cleaned,
                 "urls": urls,
             })
+            fetched_ids.append(msg_id)
     except Exception:
         logger.exception("Failed to fetch Gmail newsletters")
 
-    return newsletters
+    return newsletters, fetched_ids
 
 
 if __name__ == "__main__":

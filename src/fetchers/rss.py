@@ -243,10 +243,9 @@ def fetch_rss_articles(hours: int = 24) -> dict[str, list[dict]]:
 
     # Save checkpoint: merge current links with previous to avoid re-sending
     merged_links = list(prev_links | set(all_links))
-    _save_checkpoint({
-        "links": merged_links,
-        "last_run": datetime.now(timezone.utc).isoformat(),
-    })
+    checkpoint["links"] = merged_links
+    checkpoint["last_run"] = datetime.now(timezone.utc).isoformat()
+    _save_checkpoint(checkpoint)
 
     return results
 

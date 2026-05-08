@@ -6,7 +6,7 @@ import time
 import anthropic
 from dotenv import load_dotenv
 
-from src.fetchers.rss import fetch_rss_articles
+from src.fetchers.rss import fetch_rss_articles, _load_checkpoint, _save_checkpoint
 from src.fetchers.gmail import fetch_gmail_newsletters
 from src.fetchers.twitter import fetch_tweets
 from src.summarizer import summarize_content
@@ -36,7 +36,13 @@ def run_digest(hours: int = 24, dry_run: bool = False, rss_only: bool = False, s
         logger.info("Fetching Gmail newsletters...")
         start = time.time()
         try:
-            newsletters = fetch_gmail_newsletters(hours=hours)
+            checkpoint = _load_checkpoint()
+            prev_message_ids = set(checkpoint.get("newsletter_message_ids", []))
+            newsletters, new_message_ids = fetch_gmail_newsletters(hours=hours, prev_message_ids=prev_message_ids)
+            # Save newsletter IDs to checkpoint
+            merged_ids = list(prev_message_ids | set(new_message_ids))
+            checkpoint["newsletter_message_ids"] = merged_ids
+            _save_checkpoint(checkpoint)
             logger.info("Gmail: %d newsletters (%.1fs)", len(newsletters), time.time() - start)
         except FileNotFoundError:
             logger.warning("Gmail OAuth not configured — skipping. Set up credentials.json to enable.")
