@@ -1,0 +1,45 @@
+feeds:
+  anthropic:
+    - url: "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_anthropic_news.xml"
+      label: "Anthropic News"
+    - url: "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_anthropic_research.xml"
+      label: "Anthropic Research"
+    - url: "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_anthropic_engineering.xml"
+      label: "Anthropic Engineering"
+    - url: "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_claude.xml"
+      label: "Anthropic Claude"
+  openai:
+    - url: "https://openai.com/news/rss.xml"
+      label: "OpenAI News"
+  meta:
+    - url: "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_meta_ai.xml"
+      label: "Meta AI"
+    - url: "https://research.facebook.com/feed/"
+      label: "Meta Research"
+    - url: "https://engineering.fb.com/feed/"
+      label: "Meta Engineering"
+  google:
+    - url: "https://deepmind.google/blog/rss.xml"
+      label: "DeepMind Blog"
+    - url: "https://blog.google/technology/ai/rss"
+      label: "Google AI Blog"
+    - url: "https://research.google/blog/rss/"
+      label: "Google Research"
+  microsoft:
+    - url: "https://blogs.microsoft.com/ai/feed/"
+      label: "Microsoft AI"
+
+# Blog pages without native RSS feeds — fetched via HTML scraping
+scrape:
+  perplexity:
+    - url: "https://www.perplexity.ai/blog"
+      label: "Perplexity Blog"
+  glean:
+    - url: "https://www.glean.com/blog"
+      label: "Glean Blog"
+  sierra:
+    - url: "https://sierra.ai/blog"
+      label: "Sierra Blog"
+  scale_ai:
+    - url: "https://scale.com/blog"
+      label: "Scale AI Blog"
