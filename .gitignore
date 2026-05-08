@@ -5,3 +5,4 @@ venv/
 token.json
 credentials.json
 logs/
+data/

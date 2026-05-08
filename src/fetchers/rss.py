@@ -1,4 +1,6 @@
+import json
 import logging
+import re
 import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -11,14 +13,40 @@ from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
-CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "feeds.yaml"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+CONFIG_PATH = PROJECT_ROOT / "config" / "feeds.yaml"
+CHECKPOINT_PATH = PROJECT_ROOT / "data" / "checkpoint.json"
 REQUEST_TIMEOUT = 15
 HEADERS = {"User-Agent": "IndustryNewsDigest/1.0"}
+
+_DATE_PATTERN = re.compile(
+    r"((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4})"
+)
+
+_KNOWN_CATEGORIES = sorted([
+    "Cross-Industry", "Societal Impacts", "Societal Impact",
+    "AI Agents", "AI Agent", "AI Assistant",
+    "Policy", "Research", "Productivity", "Product", "Government", "Alignment",
+    "Technology", "Sales", "Engineering",
+    "Safety", "Announcements", "Announcement", "Company",
+    "Enterprise", "Security", "Customers", "Customer",
+], key=len, reverse=True)
 
 
 def _load_config() -> dict:
     with open(CONFIG_PATH) as f:
         return yaml.safe_load(f)
+
+
+def _load_checkpoint() -> dict:
+    if CHECKPOINT_PATH.exists():
+        return json.loads(CHECKPOINT_PATH.read_text())
+    return {}
+
+
+def _save_checkpoint(checkpoint: dict):
+    CHECKPOINT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CHECKPOINT_PATH.write_text(json.dumps(checkpoint, indent=2))
 
 
 def _parse_entry_time(entry) -> datetime | None:
@@ -39,68 +67,18 @@ def _truncate(text: str, max_chars: int = 2000) -> str:
     return text[:max_chars] + "..."
 
 
-def _fetch_rss_feed(url: str, label: str, cutoff: datetime) -> list[dict]:
-    articles = []
-    try:
-        parsed = feedparser.parse(url, agent=HEADERS["User-Agent"])
-        if parsed.bozo and not parsed.entries:
-            logger.warning("Feed error for %s (%s): %s", label, url, parsed.bozo_exception)
-            return articles
-
-        for entry in parsed.entries:
-            published = _parse_entry_time(entry)
-            if published and published < cutoff:
-                continue
-            if not published:
-                continue
-
-            raw_title = getattr(entry, "title", "Untitled")
-            date_str, category, clean_title = _parse_scraped_title(raw_title)
-
-            summary_raw = getattr(entry, "summary", "") or getattr(entry, "description", "") or ""
-            articles.append({
-                "title": clean_title or raw_title,
-                "link": getattr(entry, "link", ""),
-                "summary": _truncate(_strip_html(summary_raw)),
-                "source_label": label,
-                "published": published.isoformat(),
-                "category": category,
-            })
-    except Exception:
-        logger.exception("Failed to fetch feed: %s (%s)", label, url)
-    return articles
-
-
-import re
-
-_DATE_PATTERN = re.compile(
-    r"((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4})"
-)
-
-_KNOWN_CATEGORIES = sorted([
-    "Cross-Industry", "Societal Impacts", "Societal Impact",
-    "AI Agents", "AI Agent", "AI Assistant",
-    "Policy", "Research", "Productivity", "Product", "Government", "Alignment",
-    "Technology", "Sales", "Engineering",
-    "Safety", "Announcements", "Announcement", "Company",
-    "Enterprise", "Security", "Customers", "Customer",
-], key=len, reverse=True)
-
-
 def _parse_scraped_title(raw_title: str) -> tuple[str, str, str]:
     """Parse a scraped title into (date, category, clean_title)."""
     text = raw_title.strip()
     date = ""
     categories = []
 
-    # Extract date (could be at start or middle)
     date_match = _DATE_PATTERN.search(text)
     if date_match:
         date = date_match.group(1)
         text = text[:date_match.start()] + text[date_match.end():]
         text = text.strip()
 
-    # Strip known category words from the front (they can be concatenated)
     changed = True
     while changed:
         changed = False
@@ -115,8 +93,53 @@ def _parse_scraped_title(raw_title: str) -> tuple[str, str, str]:
     return date, category, text
 
 
-def _scrape_blog_page(url: str, label: str, cutoff: datetime, max_articles: int = 10) -> list[dict]:
-    """Scrape the most recent article titles and links from a blog index page."""
+def _fetch_rss_feed(url: str, label: str, cutoff: datetime, prev_links: set) -> list[dict]:
+    """Fetch articles from an RSS feed.
+
+    - If an entry has a date and it's within the cutoff: include it.
+    - If an entry has a date and it's before the cutoff: skip it.
+    - If an entry has no date: include it only if its link is NOT in prev_links (checkpoint).
+    """
+    articles = []
+    try:
+        parsed = feedparser.parse(url, agent=HEADERS["User-Agent"])
+        if parsed.bozo and not parsed.entries:
+            logger.warning("Feed error for %s (%s): %s", label, url, parsed.bozo_exception)
+            return articles
+
+        for entry in parsed.entries[:10]:
+            published = _parse_entry_time(entry)
+            link = getattr(entry, "link", "")
+
+            if published and published < cutoff:
+                continue
+            if not published and link in prev_links:
+                continue
+
+            raw_title = getattr(entry, "title", "Untitled")
+            date_str, category, clean_title = _parse_scraped_title(raw_title)
+
+            summary_raw = getattr(entry, "summary", "") or getattr(entry, "description", "") or ""
+            articles.append({
+                "title": clean_title or raw_title,
+                "link": link,
+                "summary": _truncate(_strip_html(summary_raw)),
+                "source_label": label,
+                "published": published.isoformat() if published else "unknown",
+                "category": category,
+            })
+    except Exception:
+        logger.exception("Failed to fetch feed: %s (%s)", label, url)
+    return articles
+
+
+def _scrape_blog_page(url: str, label: str, cutoff: datetime, prev_links: set, max_articles: int = 10) -> list[dict]:
+    """Scrape blog page for articles.
+
+    - If a date is parsed and it's within the cutoff: include it.
+    - If a date is parsed and it's before the cutoff: skip it.
+    - If no date can be parsed: include it only if its link is NOT in prev_links (checkpoint).
+    """
     articles = []
     try:
         resp = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
@@ -137,7 +160,6 @@ def _scrape_blog_page(url: str, label: str, cutoff: datetime, max_articles: int 
                 continue
             seen_links.add(full_url)
 
-            # Get full text for date/category parsing
             full_text = a_tag.get_text(strip=True)
             if not full_text or len(full_text) < 10:
                 continue
@@ -145,32 +167,35 @@ def _scrape_blog_page(url: str, label: str, cutoff: datetime, max_articles: int 
             # Parse date and category from full text
             date_str, category, _ = _parse_scraped_title(full_text)
 
-            # Use heading for clean title if available, otherwise parse from full text
+            # Use heading for clean title if available
             heading = a_tag.find(["h1", "h2", "h3", "h4", "h5", "h6"])
             if heading:
                 clean_title = heading.get_text(strip=True)
             else:
                 _, _, clean_title = _parse_scraped_title(full_text)
 
-            # Only include articles with a parseable date within the cutoff
-            if not date_str:
+            if not clean_title or len(clean_title) < 5:
                 continue
-            try:
-                parsed_date = datetime.strptime(date_str, "%B %d, %Y").replace(tzinfo=timezone.utc)
-                if parsed_date < cutoff:
+
+            # Date-based filtering
+            if date_str:
+                try:
+                    parsed_date = datetime.strptime(date_str, "%B %d, %Y").replace(tzinfo=timezone.utc)
+                    if parsed_date < cutoff:
+                        continue
+                except ValueError:
+                    pass
+            else:
+                # No date — use checkpoint to decide
+                if full_url in prev_links:
                     continue
-            except ValueError:
-                continue
 
-            # Split title from trailing description blurb
-            # Use the URL slug to determine approximate title length
-            slug = full_url.rstrip("/").split("/")[-1]
-            slug_words = len(slug.replace("-", " ").split())
-
+            # Split title from trailing description if too long
             title = clean_title
             summary = ""
             if len(clean_title) > 80:
-                # Use slug word count as hint: title is roughly that many words
+                slug = full_url.rstrip("/").split("/")[-1]
+                slug_words = len(slug.replace("-", " ").split())
                 words = clean_title.split()
                 if slug_words >= 3 and slug_words < len(words):
                     title = " ".join(words[:slug_words + 2])
@@ -191,7 +216,7 @@ def _scrape_blog_page(url: str, label: str, cutoff: datetime, max_articles: int 
                 "link": full_url,
                 "summary": _truncate(summary, 500),
                 "source_label": label,
-                "published": date_str,
+                "published": date_str or "unknown",
                 "category": category,
             })
     except Exception:
@@ -202,31 +227,45 @@ def _scrape_blog_page(url: str, label: str, cutoff: datetime, max_articles: int 
 def fetch_rss_articles(hours: int = 24) -> dict[str, list[dict]]:
     config = _load_config()
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+    # Load previous checkpoint
+    checkpoint = _load_checkpoint()
+    prev_links = set(checkpoint.get("links", []))
+
     results = {}
+    all_links = []
 
     for company, feeds in config.get("feeds", {}).items():
         articles = []
         for feed_info in feeds:
-            articles.extend(_fetch_rss_feed(feed_info["url"], feed_info["label"], cutoff))
+            articles.extend(_fetch_rss_feed(feed_info["url"], feed_info["label"], cutoff, prev_links))
             time.sleep(0.5)
         if articles:
             results[company] = articles
+            all_links.extend(a["link"] for a in articles)
 
     for company, pages in config.get("scrape", {}).items():
         articles = []
         for page_info in pages:
-            articles.extend(_scrape_blog_page(page_info["url"], page_info["label"], cutoff))
+            articles.extend(_scrape_blog_page(page_info["url"], page_info["label"], cutoff, prev_links))
             time.sleep(0.5)
         if articles:
             results[company] = articles
+            all_links.extend(a["link"] for a in articles)
+
+    # Save checkpoint: current run's links become the "previous" for next run
+    _save_checkpoint({
+        "links": all_links,
+        "last_run": datetime.now(timezone.utc).isoformat(),
+    })
 
     return results
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-    print("Fetching RSS feeds and blog pages (last 72 hours for testing)...\n")
-    articles = fetch_rss_articles(hours=72)
+    print("Fetching RSS feeds and blog pages (last 24 hours)...\n")
+    articles = fetch_rss_articles(hours=24)
 
     total = 0
     for company, items in articles.items():

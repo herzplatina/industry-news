@@ -25,6 +25,12 @@ jobs:
           echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
           echo '${{ secrets.GOOGLE_TOKEN_JSON }}' > token.json
 
+      - name: Restore checkpoint
+        uses: actions/cache/restore@v4
+        with:
+          path: data/checkpoint.json
+          key: digest-checkpoint
+
       - name: Run digest
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -33,6 +39,13 @@ jobs:
           DIGEST_RECIPIENT_EMAIL: ${{ secrets.DIGEST_RECIPIENT_EMAIL }}
         run: python -m src.main --hours 24
 
+      - name: Save checkpoint
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: data/checkpoint.json
+          key: digest-checkpoint-${{ github.run_id }}
+
       - name: Upload digest artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -40,4 +53,3 @@ jobs:
           name: digest-preview
           path: digest_preview.html
           retention-days: 7
-

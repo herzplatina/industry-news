@@ -32,7 +32,7 @@ def send_digest(markdown_content: str, dry_run: bool = False, raw_sources: str |
 
     full_markdown = markdown_content
     if raw_sources:
-        full_markdown += "\n\n---\n\n# Raw Sources\n\n<pre>\n" + raw_sources + "\n</pre>"
+        full_markdown += "\n\n---\n\n# Raw Sources\n\n" + raw_sources
 
     html = _render_html(full_markdown)
 
