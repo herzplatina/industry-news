@@ -33,6 +33,25 @@ _KNOWN_CATEGORIES = sorted([
 ], key=len, reverse=True)
 
 
+def fetch_article_body(url: str) -> str:
+    """Fetch and extract main text content from an article URL."""
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+        # Remove nav, footer, script, style
+        for tag in soup(["nav", "footer", "script", "style", "header", "aside"]):
+            tag.decompose()
+        # Try article tag first, fall back to body
+        article = soup.find("article") or soup.find("main") or soup.body
+        if not article:
+            return ""
+        text = article.get_text(separator=" ", strip=True)
+        return text[:8000]
+    except Exception:
+        return ""
+
+
 def _load_config() -> dict:
     with open(CONFIG_PATH) as f:
         return yaml.safe_load(f)

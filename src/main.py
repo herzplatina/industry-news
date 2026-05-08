@@ -6,7 +6,7 @@ import time
 import anthropic
 from dotenv import load_dotenv
 
-from src.fetchers.rss import fetch_rss_articles, _load_checkpoint, _save_checkpoint
+from src.fetchers.rss import fetch_rss_articles, fetch_article_body, _load_checkpoint, _save_checkpoint
 from src.fetchers.gmail import fetch_gmail_newsletters
 from src.fetchers.twitter import fetch_tweets
 from src.summarizer import summarize_content
@@ -90,10 +90,12 @@ def run_digest(hours: int = 24, dry_run: bool = False, rss_only: bool = False, s
                 }],
             },
         })
-    # RSS article summarization requests
+    # Fetch full article bodies and build RSS summarization requests
     rss_flat = []
+    logger.info("Fetching %d article bodies...", sum(len(v) for v in rss_articles.values()))
     for company, articles in rss_articles.items():
         for a in articles:
+            body = fetch_article_body(a['link'])
             rss_flat.append((company, a))
             batch_requests.append({
                 "custom_id": f"rss-{len(rss_flat) - 1}",
@@ -109,7 +111,7 @@ def run_digest(hours: int = 24, dry_run: bool = False, rss_only: bool = False, s
                             f"Title: {a['title']}\n"
                             f"Source: {a['source_label']} ({company})\n"
                             f"Link: {a['link']}\n\n"
-                            f"{a.get('summary', '')}"
+                            f"{body or a.get('summary', '')}"
                         ),
                     }],
                 },
