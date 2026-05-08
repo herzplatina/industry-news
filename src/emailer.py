@@ -27,10 +27,14 @@ def _render_html(markdown_content: str) -> str:
     )
 
 
-def send_digest(markdown_content: str, dry_run: bool = False) -> bool:
+def send_digest(markdown_content: str, dry_run: bool = False, raw_sources: str | None = None) -> bool:
     load_dotenv()
 
-    html = _render_html(markdown_content)
+    full_markdown = markdown_content
+    if raw_sources:
+        full_markdown += "\n\n---\n\n# Raw Sources\n\n<pre>\n" + raw_sources + "\n</pre>"
+
+    html = _render_html(full_markdown)
 
     if dry_run:
         output_path = Path("digest_preview.html")
@@ -48,7 +52,7 @@ def send_digest(markdown_content: str, dry_run: bool = False) -> bool:
     msg["Subject"] = subject
     msg["From"] = sender
     msg["To"] = recipient
-    msg.attach(MIMEText(markdown_content, "plain"))
+    msg.attach(MIMEText(full_markdown, "plain"))
     msg.attach(MIMEText(html, "html"))
 
     with smtplib.SMTP("smtp.gmail.com", 587) as server:

@@ -56,6 +56,15 @@ def run_digest(hours: int = 24, dry_run: bool = False, rss_only: bool = False, s
             print(f"[Email] {n['subject']} — from {n['sender']}")
         return
 
+    # Build raw sources string for debugging
+    raw_parts = []
+    for company, articles in rss_articles.items():
+        for a in articles:
+            raw_parts.append(f"[RSS/{company}] {a['title']}\n  Link: {a['link']}\n  Published: {a['published']}\n  Summary: {a.get('summary', '')[:200]}")
+    for n in newsletters:
+        raw_parts.append(f"[Email] {n['subject']}\n  From: {n['sender']}\n  Date: {n['date']}\n  Preview: {n['body_text'][:200]}")
+    raw_sources = "\n\n".join(raw_parts)
+
     # Summarize
     logger.info("Summarizing %d items with Claude...", total)
     start = time.time()
@@ -64,12 +73,12 @@ def run_digest(hours: int = 24, dry_run: bool = False, rss_only: bool = False, s
 
     if dry_run:
         print("\n" + digest_markdown)
-        send_digest(digest_markdown, dry_run=True)
+        send_digest(digest_markdown, dry_run=True, raw_sources=raw_sources)
         return
 
     # Send
     logger.info("Sending digest email...")
-    send_digest(digest_markdown)
+    send_digest(digest_markdown, raw_sources=raw_sources)
     logger.info("Done.")
 
 
