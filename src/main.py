@@ -141,13 +141,32 @@ def run_twitter_digest(hours: int = 36, dry_run: bool = False):
         logger.exception("Twitter fetcher failed")
         return
 
-    if not tweets_by_handle:
-        logger.info("No tweets found. Skipping Twitter digest.")
+    # Filter out previously-seen tweets via checkpoint
+    checkpoint = _load_checkpoint()
+    prev_tweet_urls = set(checkpoint.get("tweet_urls", []))
+    new_tweet_urls = []
+    filtered = {}
+    for handle, tweets in tweets_by_handle.items():
+        new_tweets = [t for t in tweets if t['url'] not in prev_tweet_urls]
+        if new_tweets:
+            filtered[handle] = new_tweets
+            new_tweet_urls.extend(t['url'] for t in new_tweets)
+
+    # Save checkpoint with new tweet URLs
+    merged_urls = list(prev_tweet_urls | set(new_tweet_urls))
+    checkpoint["tweet_urls"] = merged_urls
+    _save_checkpoint(checkpoint)
+
+    if not filtered:
+        logger.info("No new tweets found. Skipping Twitter digest.")
         return
+
+    new_total = sum(len(v) for v in filtered.values())
+    logger.info("Twitter: %d new tweets after checkpoint filter", new_total)
 
     # Format tweets grouped by account, chronological order
     parts = [f"# Twitter Digest\n"]
-    for handle, tweets in tweets_by_handle.items():
+    for handle, tweets in filtered.items():
         parts.append(f"## @{handle}\n")
         for t in tweets:
             timestamp = t['created_at'][:16].replace("T", " ")
