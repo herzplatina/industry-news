@@ -104,7 +104,7 @@ def _fetch_rss_feed(url: str, label: str, cutoff: datetime, prev_links: set) -> 
 
         for entry in parsed.entries[:10]:
             published = _parse_entry_time(entry)
-            link = getattr(entry, "link", "")
+            link = getattr(entry, "link", "").rstrip("/")
 
             if link in prev_links:
                 continue
@@ -142,9 +142,9 @@ def _scrape_blog_page(url: str, label: str, cutoff: datetime, prev_links: set, m
                 break
 
             href = a_tag["href"].split("?")[0]
-            full_url = urljoin(url, href)
+            full_url = urljoin(url, href).rstrip("/")
 
-            if path_match not in full_url or full_url.rstrip("/") == url.rstrip("/"):
+            if path_match not in full_url or full_url == url.rstrip("/"):
                 continue
             if full_url in seen_links or full_url in prev_links:
                 continue
@@ -216,7 +216,7 @@ def fetch_rss_articles(hours: int = 24) -> dict[str, list[dict]]:
 
     # Load previous checkpoint
     checkpoint = _load_checkpoint()
-    prev_links = set(checkpoint.get("links", []))
+    prev_links = {link.rstrip("/") for link in checkpoint.get("links", [])}
 
     results = {}
     all_links = []
@@ -242,7 +242,7 @@ def fetch_rss_articles(hours: int = 24) -> dict[str, list[dict]]:
             all_links.extend(a["link"] for a in articles)
 
     # Save checkpoint: merge current links with previous to avoid re-sending
-    merged_links = list(prev_links | set(all_links))
+    merged_links = list(prev_links | {link.rstrip("/") for link in all_links})
     checkpoint["links"] = merged_links
     checkpoint["last_run"] = datetime.now(timezone.utc).isoformat()
     _save_checkpoint(checkpoint)
