@@ -128,65 +128,36 @@ def run_twitter_digest(hours: int = 36, dry_run: bool = False):
     logger.info("Fetching tweets...")
     start = time.time()
     try:
-        tweets = fetch_tweets(hours=hours)
-        logger.info("Twitter: %d tweets (%.1fs)", len(tweets), time.time() - start)
+        tweets_by_handle = fetch_tweets(hours=hours)
+        total = sum(len(v) for v in tweets_by_handle.values())
+        logger.info("Twitter: %d tweets from %d accounts (%.1fs)", total, len(tweets_by_handle), time.time() - start)
     except Exception:
         logger.exception("Twitter fetcher failed")
         return
 
-    if not tweets:
+    if not tweets_by_handle:
         logger.info("No tweets found. Skipping Twitter digest.")
         return
 
-    # Summarize tweets with Claude
-    client = anthropic.Anthropic()
-    tweet_text = "\n\n".join(
-        f"@{t['handle']} ({t['likes']} likes, {t['retweets']} RTs)\n"
-        f"{t['text']}\n"
-        f"Link: {t['url']}"
-        for t in tweets
-    )
-
-    logger.info("Summarizing %d tweets with Claude...", len(tweets))
-    start = time.time()
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=4096,
-        system=[{
-            "type": "text",
-            "text": (
-                "You are an expert tech industry analyst. Given tweets from AI/tech leaders, "
-                "produce a concise digest highlighting the most interesting and significant posts. "
-                "Group by theme, not by person. Each item: 1-2 sentence summary with the tweet link. "
-                "Deduplicate related tweets. Prioritize by significance and engagement. "
-                "Format in markdown with section headers. Include the tweeter's handle in each item."
-            ),
-            "cache_control": {"type": "ephemeral"},
-        }],
-        messages=[{
-            "role": "user",
-            "content": f"# Tweets from the past {hours} hours\n\n{tweet_text}\n\nProduce today's Twitter digest.",
-        }],
-    )
-    digest_markdown = response.content[0].text
-    logger.info("Twitter summarization complete (%.1fs)", time.time() - start)
-
-    # Build raw tweets section
-    raw_parts = ["### Raw Tweets\n"]
-    for t in tweets:
-        raw_parts.append(f"**@{t['handle']}** ({t['likes']} likes, {t['retweets']} RTs)  ")
-        raw_parts.append(f"{t['text']}  ")
-        raw_parts.append(f"Link: {t['url']}")
-        raw_parts.append("")
-    raw_sources = "\n".join(raw_parts)
+    # Format tweets grouped by account, chronological order
+    parts = [f"# Twitter Digest\n"]
+    for handle, tweets in tweets_by_handle.items():
+        parts.append(f"## @{handle}\n")
+        for t in tweets:
+            timestamp = t['created_at'][:16].replace("T", " ")
+            parts.append(f"**{timestamp}**  ")
+            parts.append(f"{t['text']}  ")
+            parts.append(f"[Link]({t['url']})")
+            parts.append("")
+    digest_markdown = "\n".join(parts)
 
     if dry_run:
         print("\n" + digest_markdown)
-        send_twitter_digest(digest_markdown, dry_run=True, raw_sources=raw_sources)
+        send_twitter_digest(digest_markdown, dry_run=True)
         return
 
     logger.info("Sending Twitter digest email...")
-    send_twitter_digest(digest_markdown, raw_sources=raw_sources)
+    send_twitter_digest(digest_markdown)
     logger.info("Twitter digest done.")
 
 

@@ -67,32 +67,34 @@ def _get_tweets(user_id: str, handle: str, since: datetime, headers: dict) -> li
     return tweets
 
 
-def fetch_tweets(hours: int = 36) -> list[dict]:
+def fetch_tweets(hours: int = 36) -> dict[str, list[dict]]:
+    """Returns tweets grouped by handle, each list sorted chronologically (oldest first)."""
     accounts = _load_accounts()
     headers = _get_headers()
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
 
-    all_tweets = []
+    results = {}
     for handle in accounts:
         user_id = _get_user_id(handle, headers)
         if not user_id:
             continue
         tweets = _get_tweets(user_id, handle, since, headers)
-        all_tweets.extend(tweets)
+        if tweets:
+            tweets.sort(key=lambda t: t["created_at"])
+            results[handle] = tweets
         logger.info("@%s: %d tweets", handle, len(tweets))
 
-    # Sort by engagement (likes + retweets)
-    all_tweets.sort(key=lambda t: t["likes"] + t["retweets"], reverse=True)
-    return all_tweets
+    return results
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     print("Fetching tweets (last 36 hours)...\n")
-    tweets = fetch_tweets(hours=36)
-    print(f"Found {len(tweets)} tweets:\n")
-    for t in tweets[:20]:
-        print(f"  @{t['handle']} ({t['likes']}❤ {t['retweets']}🔁)")
-        print(f"  {t['text'][:100]}")
-        print(f"  {t['url']}")
+    results = fetch_tweets(hours=36)
+    total = sum(len(v) for v in results.values())
+    print(f"Found {total} tweets from {len(results)} accounts:\n")
+    for handle, tweets in results.items():
+        print(f"@{handle} — {len(tweets)} tweets")
+        for t in tweets:
+            print(f"  [{t['created_at']}] {t['text'][:80]}")
         print()
