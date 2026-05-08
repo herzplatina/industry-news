@@ -56,14 +56,15 @@ def run_digest(hours: int = 24, dry_run: bool = False, rss_only: bool = False, s
             print(f"[Email] {n['subject']} — from {n['sender']}")
         return
 
-    # Build raw sources string for debugging
+    # Build raw sources string for debugging — full content as sent to Claude
     raw_parts = []
     for company, articles in rss_articles.items():
+        raw_parts.append(f"=== RSS: {company.upper()} ===")
         for a in articles:
-            raw_parts.append(f"[RSS/{company}] {a['title']}\n  Link: {a['link']}\n  Published: {a['published']}\n  Summary: {a.get('summary', '')[:200]}")
+            raw_parts.append(f"Title: {a['title']}\nLink: {a['link']}\nPublished: {a['published']}\nSummary: {a.get('summary', '')}\n")
     for n in newsletters:
-        raw_parts.append(f"[Email] {n['subject']}\n  From: {n['sender']}\n  Date: {n['date']}\n  Preview: {n['body_text'][:200]}")
-    raw_sources = "\n\n".join(raw_parts)
+        raw_parts.append(f"=== NEWSLETTER: {n['sender']} ===\nSubject: {n['subject']}\nDate: {n['date']}\nContent:\n{n['body_text']}\n")
+    raw_sources = "\n".join(raw_parts)
 
     # Summarize
     logger.info("Summarizing %d items with Claude...", total)
