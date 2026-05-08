@@ -43,7 +43,7 @@ Rules:
 MODEL = "claude-haiku-4-5-20251001"
 
 
-def _format_rss_content(rss_articles: dict[str, list[dict]]) -> str:
+def _format_rss_content(rss_articles: dict[str, list[dict]], rss_summaries: dict[str, str] | None = None) -> str:
     parts = []
     for company, articles in rss_articles.items():
         parts.append(f"=== RSS: {company.upper()} ===")
@@ -54,8 +54,9 @@ def _format_rss_content(rss_articles: dict[str, list[dict]]) -> str:
             parts.append(f"Link: {a['link']}")
             parts.append(f"Source: {a['source_label']}")
             parts.append(f"Published: {a['published']}")
-            if a.get("summary"):
-                parts.append(f"Summary: {a['summary']}")
+            summary = (rss_summaries or {}).get(a['link'], a.get('summary', ''))
+            if summary:
+                parts.append(f"Summary: {summary}")
             parts.append("")
     return "\n".join(parts)
 
@@ -78,13 +79,14 @@ def summarize_content(
     rss_articles: dict[str, list[dict]],
     newsletters: list[dict] | None = None,
     newsletter_summaries: dict[str, str] | None = None,
+    rss_summaries: dict[str, str] | None = None,
 ) -> str:
     load_dotenv()
     client = anthropic.Anthropic()
 
     user_parts = []
     if rss_articles:
-        user_parts.append("# RSS Feed Articles\n\n" + _format_rss_content(rss_articles))
+        user_parts.append("# RSS Feed Articles\n\n" + _format_rss_content(rss_articles, rss_summaries))
     if newsletters:
         user_parts.append("# Newsletter Content\n\n" + _format_newsletter_content(newsletters, newsletter_summaries))
 

@@ -64,46 +64,85 @@ def run_digest(hours: int = 24, dry_run: bool = False, rss_only: bool = False, s
             print(f"[Email] {n['subject']} — from {n['sender']}")
         return
 
-    # Summarize each newsletter individually via Batch API
-    logger.info("Summarizing %d newsletters individually via batch...", len(newsletters))
+    # Summarize each newsletter and RSS article individually via Batch API
     client = anthropic.Anthropic()
     newsletter_summaries = {}
-    if newsletters:
-        batch_requests = []
-        for i, n in enumerate(newsletters):
+    rss_summaries = {}
+
+    batch_requests = []
+    # Newsletter summarization requests
+    for i, n in enumerate(newsletters):
+        batch_requests.append({
+            "custom_id": f"newsletter-{i}",
+            "params": {
+                "model": "claude-haiku-4-5-20251001",
+                "max_tokens": 400,
+                "messages": [{
+                    "role": "user",
+                    "content": (
+                        f"Summarize this newsletter in approximately 200 words. "
+                        f"Preserve all key facts, names, numbers, and conclusions. "
+                        f"Write in plain prose, no bullet points.\n\n"
+                        f"Subject: {n['subject']}\n"
+                        f"From: {n['sender']}\n\n"
+                        f"{n['body_text']}"
+                    ),
+                }],
+            },
+        })
+    # RSS article summarization requests
+    rss_flat = []
+    for company, articles in rss_articles.items():
+        for a in articles:
+            rss_flat.append((company, a))
             batch_requests.append({
-                "custom_id": f"newsletter-{i}",
+                "custom_id": f"rss-{len(rss_flat) - 1}",
                 "params": {
                     "model": "claude-haiku-4-5-20251001",
                     "max_tokens": 400,
                     "messages": [{
                         "role": "user",
                         "content": (
-                            f"Summarize this newsletter in approximately 200 words. "
+                            f"Summarize this article in approximately 200 words. "
                             f"Preserve all key facts, names, numbers, and conclusions. "
                             f"Write in plain prose, no bullet points.\n\n"
-                            f"Subject: {n['subject']}\n"
-                            f"From: {n['sender']}\n\n"
-                            f"{n['body_text']}"
+                            f"Title: {a['title']}\n"
+                            f"Source: {a['source_label']} ({company})\n"
+                            f"Link: {a['link']}\n\n"
+                            f"{a.get('summary', '')}"
                         ),
                     }],
                 },
             })
+
+    if batch_requests:
+        logger.info("Summarizing %d items individually via batch...", len(batch_requests))
         batch = client.messages.batches.create(requests=batch_requests)
-        logger.info("Newsletter batch created: %s", batch.id)
+        logger.info("Summary batch created: %s", batch.id)
         while batch.processing_status != "ended":
             time.sleep(5)
             batch = client.messages.batches.retrieve(batch.id)
         # Collect results
         for result in client.messages.batches.results(batch.id):
-            idx = int(result.custom_id.split("-")[1])
-            subject = newsletters[idx]['subject']
-            if result.result.type == "succeeded":
-                newsletter_summaries[subject] = result.result.message.content[0].text
-            else:
-                logger.warning("Failed to summarize newsletter: %s", subject)
-                newsletter_summaries[subject] = newsletters[idx]['body_text'][:2000]
-    logger.info("Newsletter summaries complete")
+            cid = result.custom_id
+            if cid.startswith("newsletter-"):
+                idx = int(cid.split("-")[1])
+                subject = newsletters[idx]['subject']
+                if result.result.type == "succeeded":
+                    newsletter_summaries[subject] = result.result.message.content[0].text
+                else:
+                    logger.warning("Failed to summarize newsletter: %s", subject)
+                    newsletter_summaries[subject] = newsletters[idx]['body_text'][:2000]
+            elif cid.startswith("rss-"):
+                idx = int(cid.split("-")[1])
+                company, article = rss_flat[idx]
+                link = article['link']
+                if result.result.type == "succeeded":
+                    rss_summaries[link] = result.result.message.content[0].text
+                else:
+                    logger.warning("Failed to summarize RSS article: %s", article['title'])
+                    rss_summaries[link] = article.get('summary', '')
+    logger.info("Individual summaries complete")
 
     # Build raw sources appendix for the email (proper markdown)
     raw_parts = []
@@ -114,8 +153,9 @@ def run_digest(hours: int = 24, dry_run: bool = False, rss_only: bool = False, s
             raw_parts.append(f"**{a['title']}**{category}  ")
             raw_parts.append(f"Link: {a['link']}  ")
             raw_parts.append(f"Published: {a['published']}  ")
-            if a.get("summary"):
-                raw_parts.append(f"Summary: {a['summary']}")
+            summary = rss_summaries.get(a['link'], a.get('summary', ''))
+            if summary:
+                raw_parts.append(f"Summary: {summary}")
             raw_parts.append("")
     for n in newsletters:
         raw_parts.append(f"### NEWSLETTER: {n['sender']}\n")
@@ -128,7 +168,7 @@ def run_digest(hours: int = 24, dry_run: bool = False, rss_only: bool = False, s
     # Summarize
     logger.info("Summarizing %d items with Claude...", total)
     start = time.time()
-    digest_markdown = summarize_content(rss_articles, newsletters, newsletter_summaries)
+    digest_markdown = summarize_content(rss_articles, newsletters, newsletter_summaries, rss_summaries)
     logger.info("Summarization complete (%.1fs)", time.time() - start)
 
     if dry_run:
