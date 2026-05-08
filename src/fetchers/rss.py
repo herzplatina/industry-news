@@ -94,12 +94,7 @@ def _parse_scraped_title(raw_title: str) -> tuple[str, str, str]:
 
 
 def _fetch_rss_feed(url: str, label: str, cutoff: datetime, prev_links: set) -> list[dict]:
-    """Fetch articles from an RSS feed.
-
-    - If an entry has a date and it's within the cutoff: include it.
-    - If an entry has a date and it's before the cutoff: skip it.
-    - If an entry has no date: include it only if its link is NOT in prev_links (checkpoint).
-    """
+    """Fetch articles from an RSS feed, skipping any already in the checkpoint."""
     articles = []
     try:
         parsed = feedparser.parse(url, agent=HEADERS["User-Agent"])
@@ -111,9 +106,9 @@ def _fetch_rss_feed(url: str, label: str, cutoff: datetime, prev_links: set) -> 
             published = _parse_entry_time(entry)
             link = getattr(entry, "link", "")
 
-            if published and published < cutoff:
+            if link in prev_links:
                 continue
-            if not published and link in prev_links:
+            if published and published < cutoff:
                 continue
 
             raw_title = getattr(entry, "title", "Untitled")
@@ -134,12 +129,7 @@ def _fetch_rss_feed(url: str, label: str, cutoff: datetime, prev_links: set) -> 
 
 
 def _scrape_blog_page(url: str, label: str, cutoff: datetime, prev_links: set, max_articles: int = 10, path_match: str = "/blog/", min_title_length: int = 5) -> list[dict]:
-    """Scrape blog page for articles.
-
-    - If a date is parsed and it's within the cutoff: include it.
-    - If a date is parsed and it's before the cutoff: skip it.
-    - If no date can be parsed: include it only if its link is NOT in prev_links (checkpoint).
-    """
+    """Scrape blog page for articles, skipping any already in the checkpoint."""
     articles = []
     try:
         resp = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
@@ -156,7 +146,7 @@ def _scrape_blog_page(url: str, label: str, cutoff: datetime, prev_links: set, m
 
             if path_match not in full_url or full_url.rstrip("/") == url.rstrip("/"):
                 continue
-            if full_url in seen_links:
+            if full_url in seen_links or full_url in prev_links:
                 continue
             seen_links.add(full_url)
 
@@ -185,10 +175,6 @@ def _scrape_blog_page(url: str, label: str, cutoff: datetime, prev_links: set, m
                         continue
                 except ValueError:
                     pass
-            else:
-                # No date — use checkpoint to decide
-                if full_url in prev_links:
-                    continue
 
             # Split title from trailing description if too long
             title = clean_title
@@ -255,9 +241,10 @@ def fetch_rss_articles(hours: int = 24) -> dict[str, list[dict]]:
             results[company] = articles
             all_links.extend(a["link"] for a in articles)
 
-    # Save checkpoint: current run's links become the "previous" for next run
+    # Save checkpoint: merge current links with previous to avoid re-sending
+    merged_links = list(prev_links | set(all_links))
     _save_checkpoint({
-        "links": all_links,
+        "links": merged_links,
         "last_run": datetime.now(timezone.utc).isoformat(),
     })
 
