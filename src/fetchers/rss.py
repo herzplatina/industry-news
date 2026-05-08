@@ -137,8 +137,11 @@ def _scrape_blog_page(url: str, label: str, cutoff: datetime, prev_links: set, m
         soup = BeautifulSoup(resp.text, "html.parser")
 
         seen_links = set()
+        candidates_checked = 0
         for a_tag in soup.find_all("a", href=True):
             if len(articles) >= max_articles:
+                break
+            if candidates_checked >= max_articles * 2:
                 break
 
             href = a_tag["href"].split("?")[0]
@@ -146,9 +149,12 @@ def _scrape_blog_page(url: str, label: str, cutoff: datetime, prev_links: set, m
 
             if path_match not in full_url or full_url == url.rstrip("/"):
                 continue
-            if full_url in seen_links or full_url in prev_links:
+            if full_url in seen_links:
                 continue
             seen_links.add(full_url)
+            candidates_checked += 1
+            if full_url in prev_links:
+                continue
 
             full_text = a_tag.get_text(strip=True)
             if not full_text or len(full_text) < 10:
