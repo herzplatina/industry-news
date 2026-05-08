@@ -36,9 +36,11 @@ def send_digest(markdown_content: str, dry_run: bool = False, raw_sources: str |
 
     html = _render_html(full_markdown)
 
+    # Always save preview for artifact upload
+    output_path = Path("digest_preview.html")
+    output_path.write_text(html)
+
     if dry_run:
-        output_path = Path("digest_preview.html")
-        output_path.write_text(html)
         logger.info("Dry run: HTML written to %s", output_path)
         return True
 
