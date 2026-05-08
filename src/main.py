@@ -107,7 +107,7 @@ def run_digest(hours: int = 24, dry_run: bool = False, rss_only: bool = False, s
     # Summarize
     logger.info("Summarizing %d items with Claude...", total)
     start = time.time()
-    digest_markdown = summarize_content(rss_articles, newsletters)
+    digest_markdown = summarize_content(rss_articles, newsletters, newsletter_summaries)
     logger.info("Summarization complete (%.1fs)", time.time() - start)
 
     if dry_run:

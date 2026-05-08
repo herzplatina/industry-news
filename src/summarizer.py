@@ -59,13 +59,14 @@ def _format_rss_content(rss_articles: dict[str, list[dict]]) -> str:
     return "\n".join(parts)
 
 
-def _format_newsletter_content(newsletters: list[dict]) -> str:
+def _format_newsletter_content(newsletters: list[dict], newsletter_summaries: dict[str, str] | None = None) -> str:
     parts = []
     for n in newsletters:
         parts.append(f"=== NEWSLETTER: {n['sender']} ===")
         parts.append(f"Subject: {n['subject']}")
         parts.append(f"Date: {n['date']}")
-        parts.append(f"Content: {n['body_text']}")
+        content = newsletter_summaries.get(n['subject'], n['body_text']) if newsletter_summaries else n['body_text']
+        parts.append(f"Content: {content}")
         if n.get("urls"):
             parts.append(f"Links in newsletter: {' | '.join(n['urls'])}")
         parts.append("")
@@ -75,6 +76,7 @@ def _format_newsletter_content(newsletters: list[dict]) -> str:
 def summarize_content(
     rss_articles: dict[str, list[dict]],
     newsletters: list[dict] | None = None,
+    newsletter_summaries: dict[str, str] | None = None,
 ) -> str:
     load_dotenv()
     client = anthropic.Anthropic()
@@ -83,7 +85,7 @@ def summarize_content(
     if rss_articles:
         user_parts.append("# RSS Feed Articles\n\n" + _format_rss_content(rss_articles))
     if newsletters:
-        user_parts.append("# Newsletter Content\n\n" + _format_newsletter_content(newsletters))
+        user_parts.append("# Newsletter Content\n\n" + _format_newsletter_content(newsletters, newsletter_summaries))
 
     user_content = "\n\n---\n\n".join(user_parts)
     user_content += "\n\nPlease produce today's industry news digest based on the above content."
