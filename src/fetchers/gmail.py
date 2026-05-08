@@ -173,11 +173,12 @@ def fetch_gmail_newsletters(hours: int = 24) -> list[dict]:
 
             urls = _extract_urls(body_html) if body_html else []
 
+            cleaned = _clean_body(body_text)
             newsletters.append({
                 "subject": headers.get("subject", "No Subject"),
                 "sender": headers.get("from", "Unknown"),
                 "date": headers.get("date", "Unknown"),
-                "body_text": _truncate(_clean_body(body_text)),
+                "body_text": cleaned,
                 "urls": urls,
             })
     except Exception:
