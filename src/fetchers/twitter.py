@@ -116,7 +116,7 @@ def _get_user_id(handle: str, headers: dict[str, str]) -> str | None:
         timeout=10,
     )
     if resp.status_code != 200:
-        logger.warning("Failed to look up @%s: %s", handle, resp.status_code)
+        logger.warning("Failed to look up @%s: %s — %s", handle, resp.status_code, resp.text)
         return None
     return resp.json().get("data", {}).get("id")
 
@@ -137,7 +137,7 @@ def _get_tweets(
         timeout=10,
     )
     if resp.status_code != 200:
-        logger.warning("Failed to fetch tweets for @%s: %s", handle, resp.status_code)
+        logger.warning("Failed to fetch tweets for @%s: %s — %s", handle, resp.status_code, resp.text)
         return []
 
     tweets = []
