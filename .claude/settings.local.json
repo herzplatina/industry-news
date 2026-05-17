@@ -8,7 +8,12 @@
       "Bash(python3 *)",
       "WebSearch",
       "Bash(awk 'length > 88 {print FILENAME \":\" FNR \": \" length \"c: \" $0}' src/checkpoint.py src/summarizer.py src/emailer.py src/fetchers/rss.py src/fetchers/gmail.py src/fetchers/twitter.py src/main.py)",
-      "Bash(ruff check *)"
+      "Bash(ruff check *)",
+      "Bash(gh workflow *)",
+      "Bash(gh run *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)"
     ]
   },
   "hooks": {
