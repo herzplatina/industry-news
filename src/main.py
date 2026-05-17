@@ -6,22 +6,35 @@ import time
 import anthropic
 from dotenv import load_dotenv
 
-from src.fetchers.rss import fetch_rss_articles, fetch_article_body, _load_checkpoint, _save_checkpoint
+from src.checkpoint import load_checkpoint, save_checkpoint
+from src.fetchers.rss import fetch_rss_articles, fetch_article_body
 from src.fetchers.gmail import fetch_gmail_newsletters
 from src.fetchers.twitter import fetch_tweets
-from src.summarizer import summarize_content
+from src.summarizer import (
+    summarize_content,
+    MODEL,
+    ITEM_SUMMARY_MAX_TOKENS,
+    BATCH_POLL_INTERVAL_SECS,
+    NEWSLETTER_SUMMARY_PROMPT,
+    RSS_SUMMARY_PROMPT,
+)
+
 from src.emailer import send_digest, send_twitter_digest
 
 logger = logging.getLogger(__name__)
 
+NEWSLETTER_FALLBACK_CHARS = 2_000  # cap for fallback when summarization fails
 
-def run_digest(hours: int = 24, dry_run: bool = False, rss_only: bool = False, skip_summarize: bool = False):
-    load_dotenv()
 
+def run_digest(
+    hours: int = 24,
+    dry_run: bool = False,
+    rss_only: bool = False,
+    skip_summarize: bool = False,
+) -> None:
     rss_articles = {}
     newsletters = []
 
-    # Fetch RSS
     logger.info("Fetching RSS feeds...")
     start = time.time()
     try:
@@ -31,18 +44,18 @@ def run_digest(hours: int = 24, dry_run: bool = False, rss_only: bool = False, s
     except Exception:
         logger.exception("RSS fetcher failed")
 
-    # Fetch Gmail
     if not rss_only:
         logger.info("Fetching Gmail newsletters...")
         start = time.time()
         try:
-            checkpoint = _load_checkpoint()
+            checkpoint = load_checkpoint()
             prev_message_ids = set(checkpoint.get("newsletter_message_ids", []))
-            newsletters, new_message_ids = fetch_gmail_newsletters(hours=hours, prev_message_ids=prev_message_ids)
-            # Save newsletter IDs to checkpoint
+            newsletters, new_message_ids = fetch_gmail_newsletters(
+                hours=hours, prev_message_ids=prev_message_ids
+            )
             merged_ids = list(prev_message_ids | set(new_message_ids))
             checkpoint["newsletter_message_ids"] = merged_ids
-            _save_checkpoint(checkpoint)
+            save_checkpoint(checkpoint)
             logger.info("Gmail: %d newsletters (%.1fs)", len(newsletters), time.time() - start)
         except FileNotFoundError:
             logger.warning("Gmail OAuth not configured — skipping. Set up credentials.json to enable.")
@@ -54,7 +67,6 @@ def run_digest(hours: int = 24, dry_run: bool = False, rss_only: bool = False, s
         logger.info("No new content found. Skipping digest.")
         return
 
-    # Skip summarize — just print raw content
     if skip_summarize:
         print(f"\n=== RAW CONTENT: {total} items ===\n")
         for company, articles in rss_articles.items():
@@ -64,54 +76,47 @@ def run_digest(hours: int = 24, dry_run: bool = False, rss_only: bool = False, s
             print(f"[Email] {n['subject']} — from {n['sender']}")
         return
 
-    # Summarize each newsletter and RSS article individually via Batch API
     client = anthropic.Anthropic()
     newsletter_summaries = {}
     rss_summaries = {}
 
     batch_requests = []
-    # Newsletter summarization requests
     for i, n in enumerate(newsletters):
         batch_requests.append({
             "custom_id": f"newsletter-{i}",
             "params": {
-                "model": "claude-haiku-4-5-20251001",
-                "max_tokens": 400,
+                "model": MODEL,
+                "max_tokens": ITEM_SUMMARY_MAX_TOKENS,
                 "messages": [{
                     "role": "user",
-                    "content": (
-                        f"Summarize this newsletter in approximately 200 words. "
-                        f"Preserve all key facts, names, numbers, and conclusions. "
-                        f"Write in plain prose, no bullet points.\n\n"
-                        f"Subject: {n['subject']}\n"
-                        f"From: {n['sender']}\n\n"
-                        f"{n['body_text']}"
+                    "content": NEWSLETTER_SUMMARY_PROMPT.format(
+                        subject=n["subject"],
+                        sender=n["sender"],
+                        body_text=n["body_text"],
                     ),
                 }],
             },
         })
-    # Fetch full article bodies and build RSS summarization requests
+
     rss_flat = []
     logger.info("Fetching %d article bodies...", sum(len(v) for v in rss_articles.values()))
     for company, articles in rss_articles.items():
         for a in articles:
-            body = fetch_article_body(a['link'])
+            body = fetch_article_body(a["link"])
             rss_flat.append((company, a))
             batch_requests.append({
                 "custom_id": f"rss-{len(rss_flat) - 1}",
                 "params": {
-                    "model": "claude-haiku-4-5-20251001",
-                    "max_tokens": 400,
+                    "model": MODEL,
+                    "max_tokens": ITEM_SUMMARY_MAX_TOKENS,
                     "messages": [{
                         "role": "user",
-                        "content": (
-                            f"Summarize this article in approximately 200 words. "
-                            f"Preserve all key facts, names, numbers, and conclusions. "
-                            f"Write in plain prose, no bullet points.\n\n"
-                            f"Title: {a['title']}\n"
-                            f"Source: {a['source_label']} ({company})\n"
-                            f"Link: {a['link']}\n\n"
-                            f"{body or a.get('summary', '')}"
+                        "content": RSS_SUMMARY_PROMPT.format(
+                            title=a["title"],
+                            source_label=a["source_label"],
+                            company=company,
+                            link=a["link"],
+                            body_text=body or a.get("summary", ""),
                         ),
                     }],
                 },
@@ -122,31 +127,31 @@ def run_digest(hours: int = 24, dry_run: bool = False, rss_only: bool = False, s
         batch = client.messages.batches.create(requests=batch_requests)
         logger.info("Summary batch created: %s", batch.id)
         while batch.processing_status != "ended":
-            time.sleep(5)
+            time.sleep(BATCH_POLL_INTERVAL_SECS)
             batch = client.messages.batches.retrieve(batch.id)
-        # Collect results
         for result in client.messages.batches.results(batch.id):
             cid = result.custom_id
             if cid.startswith("newsletter-"):
                 idx = int(cid.split("-")[1])
-                subject = newsletters[idx]['subject']
+                subject = newsletters[idx]["subject"]
                 if result.result.type == "succeeded":
-                    newsletter_summaries[subject] = result.result.message.content[0].text
+                    text = result.result.message.content[0].text
+                    newsletter_summaries[subject] = text
                 else:
                     logger.warning("Failed to summarize newsletter: %s", subject)
-                    newsletter_summaries[subject] = newsletters[idx]['body_text'][:2000]
+                    fallback = newsletters[idx]["body_text"][:NEWSLETTER_FALLBACK_CHARS]
+                    newsletter_summaries[subject] = fallback
             elif cid.startswith("rss-"):
                 idx = int(cid.split("-")[1])
                 company, article = rss_flat[idx]
-                link = article['link']
+                link = article["link"]
                 if result.result.type == "succeeded":
                     rss_summaries[link] = result.result.message.content[0].text
                 else:
-                    logger.warning("Failed to summarize RSS article: %s", article['title'])
-                    rss_summaries[link] = article.get('summary', '')
+                    logger.warning("Failed to summarize RSS article: %s", article["title"])
+                    rss_summaries[link] = article.get("summary", "")
     logger.info("Individual summaries complete")
 
-    # Build raw sources appendix for the email (proper markdown)
     raw_parts = []
     for company, articles in rss_articles.items():
         raw_parts.append(f"### RSS: {company.upper()}\n")
@@ -155,7 +160,7 @@ def run_digest(hours: int = 24, dry_run: bool = False, rss_only: bool = False, s
             raw_parts.append(f"**{a['title']}**{category}  ")
             raw_parts.append(f"Link: {a['link']}  ")
             raw_parts.append(f"Published: {a['published']}  ")
-            summary = rss_summaries.get(a['link'], a.get('summary', ''))
+            summary = rss_summaries.get(a["link"], a.get("summary", ""))
             if summary:
                 raw_parts.append(f"Summary: {summary}")
             raw_parts.append("")
@@ -163,14 +168,16 @@ def run_digest(hours: int = 24, dry_run: bool = False, rss_only: bool = False, s
         raw_parts.append(f"### NEWSLETTER: {n['sender']}\n")
         raw_parts.append(f"**{n['subject']}**  ")
         raw_parts.append(f"Date: {n['date']}  ")
-        raw_parts.append(f"\n{newsletter_summaries.get(n['subject'], n['body_text'][:2000])}")
+        body_fallback = n["body_text"][:NEWSLETTER_FALLBACK_CHARS]
+        raw_parts.append("\n" + newsletter_summaries.get(n["subject"], body_fallback))
         raw_parts.append("")
     raw_sources = "\n".join(raw_parts)
 
-    # Summarize
     logger.info("Summarizing %d items with Claude...", total)
     start = time.time()
-    digest_markdown = summarize_content(rss_articles, newsletters, newsletter_summaries, rss_summaries)
+    digest_markdown = summarize_content(
+        rss_articles, newsletters, newsletter_summaries, rss_summaries
+    )
     logger.info("Summarization complete (%.1fs)", time.time() - start)
 
     if dry_run:
@@ -178,15 +185,12 @@ def run_digest(hours: int = 24, dry_run: bool = False, rss_only: bool = False, s
         send_digest(digest_markdown, dry_run=True, raw_sources=raw_sources)
         return
 
-    # Send
     logger.info("Sending digest email...")
     send_digest(digest_markdown, raw_sources=raw_sources)
     logger.info("Done.")
 
 
-def run_twitter_digest(hours: int = 36, dry_run: bool = False):
-    load_dotenv()
-
+def run_twitter_digest(hours: int = 36, dry_run: bool = False) -> None:
     logger.info("Fetching tweets...")
     start = time.time()
     try:
@@ -197,21 +201,19 @@ def run_twitter_digest(hours: int = 36, dry_run: bool = False):
         logger.exception("Twitter fetcher failed")
         return
 
-    # Filter out previously-seen tweets via checkpoint
-    checkpoint = _load_checkpoint()
+    checkpoint = load_checkpoint()
     prev_tweet_urls = set(checkpoint.get("tweet_urls", []))
     new_tweet_urls = []
     filtered = {}
     for handle, tweets in tweets_by_handle.items():
-        new_tweets = [t for t in tweets if t['url'] not in prev_tweet_urls]
+        new_tweets = [t for t in tweets if t["url"] not in prev_tweet_urls]
         if new_tweets:
             filtered[handle] = new_tweets
-            new_tweet_urls.extend(t['url'] for t in new_tweets)
+            new_tweet_urls.extend(t["url"] for t in new_tweets)
 
-    # Save checkpoint with new tweet URLs
     merged_urls = list(prev_tweet_urls | set(new_tweet_urls))
     checkpoint["tweet_urls"] = merged_urls
-    _save_checkpoint(checkpoint)
+    save_checkpoint(checkpoint)
 
     if not filtered:
         logger.info("No new tweets found. Skipping Twitter digest.")
@@ -220,12 +222,11 @@ def run_twitter_digest(hours: int = 36, dry_run: bool = False):
     new_total = sum(len(v) for v in filtered.values())
     logger.info("Twitter: %d new tweets after checkpoint filter", new_total)
 
-    # Format tweets grouped by account, chronological order
-    parts = [f"# Twitter Digest\n"]
+    parts = ["# Twitter Digest\n"]
     for handle, tweets in filtered.items():
         parts.append(f"## @{handle}\n")
         for t in tweets:
-            timestamp = t['created_at'][:16].replace("T", " ")
+            timestamp = t["created_at"][:16].replace("T", " ")
             parts.append(f"**{timestamp}**  ")
             parts.append(f"{t['text']}  ")
             parts.append(f"[Link]({t['url']})")
@@ -242,7 +243,7 @@ def run_twitter_digest(hours: int = 36, dry_run: bool = False):
     logger.info("Twitter digest done.")
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Industry News Digest")
     parser.add_argument("--dry-run", action="store_true", help="Print digest without sending email")
     parser.add_argument("--hours", type=int, default=36, help="Time window in hours (default: 36)")
@@ -256,6 +257,8 @@ def main():
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+
+    load_dotenv()
 
     try:
         run_digest(

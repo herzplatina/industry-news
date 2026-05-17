@@ -2,6 +2,8 @@
 # Fill in the actual "From" email addresses for each sender.
 # The Gmail query will match against these addresses.
 senders:
+  - name: "a16z"
+    email: ""
   - name: "Batch @ DeepLearning.ai"
     email: ""
   - name: "Lenny's Newsletter"

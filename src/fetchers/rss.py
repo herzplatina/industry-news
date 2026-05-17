@@ -1,4 +1,3 @@
-import json
 import logging
 import re
 import time
@@ -11,13 +10,18 @@ import requests
 import yaml
 from bs4 import BeautifulSoup
 
+from src.checkpoint import load_checkpoint, save_checkpoint
+
 logger = logging.getLogger(__name__)
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-CONFIG_PATH = PROJECT_ROOT / "config" / "feeds.yaml"
-CHECKPOINT_PATH = PROJECT_ROOT / "data" / "checkpoint.json"
+CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "feeds.yaml"
 REQUEST_TIMEOUT = 15
 HEADERS = {"User-Agent": "IndustryNewsDigest/1.0"}
+ARTICLE_BODY_MAX_CHARS = 8_000
+FEED_MAX_ENTRIES = 10
+FEED_REQUEST_DELAY_SECS = 0.5
+SUMMARY_FALLBACK_MAX_CHARS = 2_000
+SCRAPE_SNIPPET_MAX_CHARS = 500
 
 _DATE_PATTERN = re.compile(
     r"((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4})"
@@ -47,7 +51,7 @@ def fetch_article_body(url: str) -> str:
         if not article:
             return ""
         text = article.get_text(separator=" ", strip=True)
-        return text[:8000]
+        return text[:ARTICLE_BODY_MAX_CHARS]
     except Exception:
         return ""
 
@@ -55,17 +59,6 @@ def fetch_article_body(url: str) -> str:
 def _load_config() -> dict:
     with open(CONFIG_PATH) as f:
         return yaml.safe_load(f)
-
-
-def _load_checkpoint() -> dict:
-    if CHECKPOINT_PATH.exists():
-        return json.loads(CHECKPOINT_PATH.read_text())
-    return {}
-
-
-def _save_checkpoint(checkpoint: dict):
-    CHECKPOINT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CHECKPOINT_PATH.write_text(json.dumps(checkpoint, indent=2))
 
 
 def _parse_entry_time(entry) -> datetime | None:
@@ -112,16 +105,23 @@ def _parse_scraped_title(raw_title: str) -> tuple[str, str, str]:
     return date, category, text
 
 
-def _fetch_rss_feed(url: str, label: str, cutoff: datetime, prev_links: set) -> list[dict]:
+def _fetch_rss_feed(
+    url: str,
+    label: str,
+    cutoff: datetime,
+    prev_links: set[str],
+) -> list[dict]:
     """Fetch articles from an RSS feed, skipping any already in the checkpoint."""
     articles = []
     try:
         parsed = feedparser.parse(url, agent=HEADERS["User-Agent"])
         if parsed.bozo and not parsed.entries:
-            logger.warning("Feed error for %s (%s): %s", label, url, parsed.bozo_exception)
+            logger.warning(
+                "Feed error for %s (%s): %s", label, url, parsed.bozo_exception
+            )
             return articles
 
-        for entry in parsed.entries[:10]:
+        for entry in parsed.entries[:FEED_MAX_ENTRIES]:
             published = _parse_entry_time(entry)
             link = getattr(entry, "link", "").rstrip("/")
 
@@ -133,11 +133,16 @@ def _fetch_rss_feed(url: str, label: str, cutoff: datetime, prev_links: set) -> 
             raw_title = getattr(entry, "title", "Untitled")
             date_str, category, clean_title = _parse_scraped_title(raw_title)
 
-            summary_raw = getattr(entry, "summary", "") or getattr(entry, "description", "") or ""
+            summary_raw = (
+                getattr(entry, "summary", "")
+                or getattr(entry, "description", "")
+                or ""
+            )
+            summary = _truncate(_strip_html(summary_raw), SUMMARY_FALLBACK_MAX_CHARS)
             articles.append({
                 "title": clean_title or raw_title,
                 "link": link,
-                "summary": _truncate(_strip_html(summary_raw)),
+                "summary": summary,
                 "source_label": label,
                 "published": published.isoformat() if published else "unknown",
                 "category": category,
@@ -147,7 +152,15 @@ def _fetch_rss_feed(url: str, label: str, cutoff: datetime, prev_links: set) -> 
     return articles
 
 
-def _scrape_blog_page(url: str, label: str, cutoff: datetime, prev_links: set, max_articles: int = 10, path_match: str = "/blog/", min_title_length: int = 5) -> list[dict]:
+def _scrape_blog_page(
+    url: str,
+    label: str,
+    cutoff: datetime,
+    prev_links: set[str],
+    max_articles: int = 10,
+    path_match: str = "/blog/",
+    min_title_length: int = 5,
+) -> list[dict]:
     """Scrape blog page for articles, skipping any already in the checkpoint."""
     articles = []
     try:
@@ -195,7 +208,8 @@ def _scrape_blog_page(url: str, label: str, cutoff: datetime, prev_links: set, m
             # Date-based filtering
             if date_str:
                 try:
-                    parsed_date = datetime.strptime(date_str, "%B %d, %Y").replace(tzinfo=timezone.utc)
+                    parsed_date = datetime.strptime(date_str, "%B %d, %Y")
+                    parsed_date = parsed_date.replace(tzinfo=timezone.utc)
                     if parsed_date < cutoff:
                         continue
                 except ValueError:
@@ -225,7 +239,7 @@ def _scrape_blog_page(url: str, label: str, cutoff: datetime, prev_links: set, m
             articles.append({
                 "title": title,
                 "link": full_url,
-                "summary": _truncate(summary, 500),
+                "summary": _truncate(summary, SCRAPE_SNIPPET_MAX_CHARS),
                 "source_label": label,
                 "published": date_str or "unknown",
                 "category": category,
@@ -239,8 +253,7 @@ def fetch_rss_articles(hours: int = 24) -> dict[str, list[dict]]:
     config = _load_config()
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
 
-    # Load previous checkpoint
-    checkpoint = _load_checkpoint()
+    checkpoint = load_checkpoint()
     prev_links = {link.rstrip("/") for link in checkpoint.get("links", [])}
 
     results = {}
@@ -249,8 +262,11 @@ def fetch_rss_articles(hours: int = 24) -> dict[str, list[dict]]:
     for company, feeds in config.get("feeds", {}).items():
         articles = []
         for feed_info in feeds:
-            articles.extend(_fetch_rss_feed(feed_info["url"], feed_info["label"], cutoff, prev_links))
-            time.sleep(0.5)
+            new = _fetch_rss_feed(
+                feed_info["url"], feed_info["label"], cutoff, prev_links
+            )
+            articles.extend(new)
+            time.sleep(FEED_REQUEST_DELAY_SECS)
         if articles:
             results[company] = articles
             all_links.extend(a["link"] for a in articles)
@@ -260,34 +276,25 @@ def fetch_rss_articles(hours: int = 24) -> dict[str, list[dict]]:
         for page_info in pages:
             path_match = page_info.get("path_match", "/blog/")
             min_title_length = page_info.get("min_title_length", 5)
-            articles.extend(_scrape_blog_page(page_info["url"], page_info["label"], cutoff, prev_links, path_match=path_match, min_title_length=min_title_length))
-            time.sleep(0.5)
+            articles.extend(
+                _scrape_blog_page(
+                    page_info["url"],
+                    page_info["label"],
+                    cutoff,
+                    prev_links,
+                    path_match=path_match,
+                    min_title_length=min_title_length,
+                )
+            )
+            time.sleep(FEED_REQUEST_DELAY_SECS)
         if articles:
             results[company] = articles
             all_links.extend(a["link"] for a in articles)
 
-    # Save checkpoint: merge current links with previous to avoid re-sending
     merged_links = list(prev_links | {link.rstrip("/") for link in all_links})
     checkpoint["links"] = merged_links
     checkpoint["last_run"] = datetime.now(timezone.utc).isoformat()
-    _save_checkpoint(checkpoint)
+    save_checkpoint(checkpoint)
 
     return results
 
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-    print("Fetching RSS feeds and blog pages (last 24 hours)...\n")
-    articles = fetch_rss_articles(hours=24)
-
-    total = 0
-    for company, items in articles.items():
-        print(f"[{company}] — {len(items)} article(s)")
-        for item in items:
-            print(f"  - {item['title']}")
-            print(f"    {item['link']}")
-            print(f"    Published: {item['published']}")
-            print()
-        total += len(items)
-
-    print(f"Total: {total} articles from {len(articles)} companies")

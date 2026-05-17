@@ -1,8 +1,8 @@
 import base64
 import logging
-import os
-from datetime import datetime, timezone, timedelta
+import re
 from pathlib import Path
+from urllib.parse import urlparse, parse_qs, unquote
 
 import yaml
 from bs4 import BeautifulSoup
@@ -19,6 +19,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 CREDENTIALS_PATH = PROJECT_ROOT / "credentials.json"
 TOKEN_PATH = PROJECT_ROOT / "token.json"
 SENDERS_PATH = PROJECT_ROOT / "config" / "senders.yaml"
+GMAIL_MAX_RESULTS = 50
+MAX_NEWSLETTER_URLS = 30
 
 
 def _load_senders() -> list[dict]:
@@ -42,7 +44,9 @@ def _get_gmail_service():
                     f"credentials.json not found at {CREDENTIALS_PATH}. "
                     "Download it from Google Cloud Console."
                 )
-            flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_PATH), SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file(
+                str(CREDENTIALS_PATH), SCOPES
+            )
             creds = flow.run_local_server(port=0)
 
         TOKEN_PATH.write_text(creds.to_json())
@@ -88,10 +92,6 @@ def _decode_body(payload: dict) -> tuple[str, str]:
     return body_text, body_html
 
 
-import re
-from urllib.parse import urlparse, parse_qs, unquote
-
-
 def _extract_urls(html: str) -> list[str]:
     """Extract meaningful article URLs from newsletter HTML."""
     soup = BeautifulSoup(html, "html.parser")
@@ -126,7 +126,7 @@ def _extract_urls(html: str) -> list[str]:
             seen.add(url)
             urls.append(url)
 
-    return urls[:30]
+    return urls[:MAX_NEWSLETTER_URLS]
 
 
 _BOILERPLATE_PATTERNS = re.compile(
@@ -144,13 +144,10 @@ def _clean_body(text: str) -> str:
     return text
 
 
-def _truncate(text: str, max_chars: int = 5000) -> str:
-    if len(text) <= max_chars:
-        return text
-    return text[:max_chars] + "..."
-
-
-def fetch_gmail_newsletters(hours: int = 24, prev_message_ids: set | None = None) -> list[dict]:
+def fetch_gmail_newsletters(
+    hours: int = 24,
+    prev_message_ids: set[str] | None = None,
+) -> tuple[list[dict], list[str]]:
     senders = _load_senders()
     service = _get_gmail_service()
     query = _build_query(senders, hours)
@@ -162,20 +159,33 @@ def fetch_gmail_newsletters(hours: int = 24, prev_message_ids: set | None = None
     newsletters = []
     fetched_ids = []
     try:
-        response = service.users().messages().list(userId="me", q=query, maxResults=50).execute()
+        response = (
+            service.users().messages()
+            .list(userId="me", q=query, maxResults=GMAIL_MAX_RESULTS)
+            .execute()
+        )
         message_ids = [m["id"] for m in response.get("messages", [])]
         logger.info("Found %d messages matching query", len(message_ids))
 
         for msg_id in message_ids:
             if msg_id in prev_message_ids:
                 continue
-            msg = service.users().messages().get(userId="me", id=msg_id, format="full").execute()
-            headers = {h["name"].lower(): h["value"] for h in msg["payload"].get("headers", [])}
+            msg = (
+                service.users().messages()
+                .get(userId="me", id=msg_id, format="full")
+                .execute()
+            )
+            headers = {
+                h["name"].lower(): h["value"]
+                for h in msg["payload"].get("headers", [])
+            }
 
             body_text, body_html = _decode_body(msg["payload"])
 
             if body_html and not body_text:
-                body_text = BeautifulSoup(body_html, "html.parser").get_text(separator=" ", strip=True)
+                body_text = BeautifulSoup(body_html, "html.parser").get_text(
+                    separator=" ", strip=True
+                )
 
             urls = _extract_urls(body_html) if body_html else []
 
@@ -194,21 +204,3 @@ def fetch_gmail_newsletters(hours: int = 24, prev_message_ids: set | None = None
 
     return newsletters, fetched_ids
 
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-    print("Fetching Gmail newsletters (last 72 hours for testing)...\n")
-
-    try:
-        newsletters = fetch_gmail_newsletters(hours=72)
-        print(f"Found {len(newsletters)} newsletters:\n")
-        for n in newsletters:
-            print(f"  From: {n['sender']}")
-            print(f"  Subject: {n['subject']}")
-            print(f"  Date: {n['date']}")
-            print(f"  Body preview: {n['body_text'][:200]}...")
-            print()
-    except FileNotFoundError as e:
-        print(f"Setup required: {e}")
-    except Exception as e:
-        print(f"Error: {e}")

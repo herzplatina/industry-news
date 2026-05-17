@@ -1,7 +1,5 @@
 import logging
-import os
 import time
-from pathlib import Path
 
 import anthropic
 from dotenv import load_dotenv
@@ -41,9 +39,34 @@ Rules:
 """
 
 MODEL = "claude-haiku-4-5-20251001"
+ITEM_SUMMARY_MAX_TOKENS = 400
+DIGEST_MAX_TOKENS = 4096
+BATCH_POLL_INTERVAL_SECS = 5
+
+NEWSLETTER_SUMMARY_PROMPT = (
+    "Summarize this newsletter in approximately 200 words. "
+    "Preserve all key facts, names, numbers, and conclusions. "
+    "Write in plain prose, no bullet points.\n\n"
+    "Subject: {subject}\n"
+    "From: {sender}\n\n"
+    "{body_text}"
+)
+
+RSS_SUMMARY_PROMPT = (
+    "Summarize this article in approximately 200 words. "
+    "Preserve all key facts, names, numbers, and conclusions. "
+    "Write in plain prose, no bullet points.\n\n"
+    "Title: {title}\n"
+    "Source: {source_label} ({company})\n"
+    "Link: {link}\n\n"
+    "{body_text}"
+)
 
 
-def _format_rss_content(rss_articles: dict[str, list[dict]], rss_summaries: dict[str, str] | None = None) -> str:
+def _format_rss_content(
+    rss_articles: dict[str, list[dict]],
+    rss_summaries: dict[str, str] | None = None,
+) -> str:
     parts = []
     for company, articles in rss_articles.items():
         parts.append(f"=== RSS: {company.upper()} ===")
@@ -61,13 +84,19 @@ def _format_rss_content(rss_articles: dict[str, list[dict]], rss_summaries: dict
     return "\n".join(parts)
 
 
-def _format_newsletter_content(newsletters: list[dict], newsletter_summaries: dict[str, str] | None = None) -> str:
+def _format_newsletter_content(
+    newsletters: list[dict],
+    newsletter_summaries: dict[str, str] | None = None,
+) -> str:
     parts = []
     for n in newsletters:
         parts.append(f"=== NEWSLETTER: {n['sender']} ===")
         parts.append(f"Subject: {n['subject']}")
         parts.append(f"Date: {n['date']}")
-        content = newsletter_summaries.get(n['subject'], n['body_text']) if newsletter_summaries else n['body_text']
+        if newsletter_summaries:
+            content = newsletter_summaries.get(n["subject"], n["body_text"])
+        else:
+            content = n["body_text"]
         parts.append(f"Content: {content}")
         if n.get("urls"):
             parts.append(f"Links in newsletter: {' | '.join(n['urls'])}")
@@ -86,9 +115,14 @@ def summarize_content(
 
     user_parts = []
     if rss_articles:
-        user_parts.append("# RSS Feed Articles\n\n" + _format_rss_content(rss_articles, rss_summaries))
+        user_parts.append(
+            "# RSS Feed Articles\n\n" + _format_rss_content(rss_articles, rss_summaries)
+        )
     if newsletters:
-        user_parts.append("# Newsletter Content\n\n" + _format_newsletter_content(newsletters, newsletter_summaries))
+        user_parts.append(
+            "# Newsletter Content\n\n"
+            + _format_newsletter_content(newsletters, newsletter_summaries)
+        )
 
     user_content = "\n\n---\n\n".join(user_parts)
     user_content += "\n\nPlease produce today's industry news digest based on the above content."
@@ -97,7 +131,7 @@ def summarize_content(
         "custom_id": "digest",
         "params": {
             "model": MODEL,
-            "max_tokens": 4096,
+            "max_tokens": DIGEST_MAX_TOKENS,
             "system": SYSTEM_PROMPT,
             "messages": [{"role": "user", "content": user_content}],
         },
@@ -105,7 +139,7 @@ def summarize_content(
     logger.info("Digest batch created: %s", batch.id)
 
     while batch.processing_status != "ended":
-        time.sleep(5)
+        time.sleep(BATCH_POLL_INTERVAL_SECS)
         batch = client.messages.batches.retrieve(batch.id)
 
     for result in client.messages.batches.results(batch.id):
@@ -120,40 +154,3 @@ def summarize_content(
 
     raise RuntimeError("Digest batch failed")
 
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-
-    sample_rss = {
-        "anthropic": [
-            {
-                "title": "Claude 4 Released with Enhanced Reasoning",
-                "link": "https://anthropic.com/blog/claude-4",
-                "summary": "Anthropic releases Claude 4, featuring significant improvements in reasoning, code generation, and multi-step task completion.",
-                "source_label": "Anthropic News",
-                "published": "2026-05-01T00:00:00+00:00",
-            }
-        ],
-        "openai": [
-            {
-                "title": "GPT-5 Turbo Now Available in API",
-                "link": "https://openai.com/blog/gpt5-turbo-api",
-                "summary": "OpenAI makes GPT-5 Turbo generally available through its API with improved latency and reduced costs.",
-                "source_label": "OpenAI News",
-                "published": "2026-05-01T00:00:00+00:00",
-            }
-        ],
-    }
-
-    sample_newsletters = [
-        {
-            "sender": "TLDR",
-            "subject": "TLDR AI: Big week in AI",
-            "date": "2026-05-01",
-            "body_text": "This week saw major releases from both Anthropic and OpenAI. Google DeepMind also published a new paper on efficient transformer architectures.",
-        }
-    ]
-
-    print("Testing summarizer with sample content...\n")
-    digest = summarize_content(sample_rss, sample_newsletters)
-    print(digest)
