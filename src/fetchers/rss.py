@@ -349,7 +349,7 @@ def fetch_rss_articles(hours: int = 24) -> dict[str, list[dict]]:
                 feed_info["url"],
                 feed_info["label"],
                 cutoff,
-                prev_links,
+                set(),  # time cutoff alone deduplicates arXiv across runs
                 seen_arxiv_links,
                 exclude_kw,
             )
@@ -357,7 +357,7 @@ def fetch_rss_articles(hours: int = 24) -> dict[str, list[dict]]:
             time.sleep(FEED_REQUEST_DELAY_SECS)
         if arxiv_articles:
             results["arxiv"] = arxiv_articles
-            all_links.extend(a["link"] for a in arxiv_articles)
+            # arXiv links intentionally excluded from checkpoint — time cutoff is sufficient
 
     for company, pages in config.get("scrape", {}).items():
         articles = []
