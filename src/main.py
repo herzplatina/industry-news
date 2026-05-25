@@ -17,6 +17,7 @@ from src.summarizer import (
     BATCH_POLL_INTERVAL_SECS,
     NEWSLETTER_SUMMARY_PROMPT,
     RSS_SUMMARY_PROMPT,
+    ARXIV_SUMMARY_PROMPT,
 )
 
 from src.emailer import send_digest, send_twitter_digest
@@ -31,6 +32,7 @@ def run_digest(
     dry_run: bool = False,
     rss_only: bool = False,
     skip_summarize: bool = False,
+    arxiv_only: bool = False,
 ) -> None:
     rss_articles = {}
     newsletters = []
@@ -39,12 +41,14 @@ def run_digest(
     start = time.time()
     try:
         rss_articles = fetch_rss_articles(hours=hours)
+        if arxiv_only:
+            rss_articles = {k: v for k, v in rss_articles.items() if k == "arxiv"}
         rss_count = sum(len(v) for v in rss_articles.values())
-        logger.info("RSS: %d articles from %d companies (%.1fs)", rss_count, len(rss_articles), time.time() - start)
+        logger.info("RSS: %d articles from %d sources (%.1fs)", rss_count, len(rss_articles), time.time() - start)
     except Exception:
         logger.exception("RSS fetcher failed")
 
-    if not rss_only:
+    if not rss_only and not arxiv_only:
         logger.info("Fetching Gmail newsletters...")
         start = time.time()
         try:
@@ -99,26 +103,32 @@ def run_digest(
         })
 
     rss_flat = []
-    logger.info("Fetching %d article bodies...", sum(len(v) for v in rss_articles.values()))
+    non_arxiv = {k: v for k, v in rss_articles.items() if k != "arxiv"}
+    logger.info("Fetching %d article bodies...", sum(len(v) for v in non_arxiv.values()))
     for company, articles in rss_articles.items():
         for a in articles:
-            body = fetch_article_body(a["link"])
             rss_flat.append((company, a))
+            if a.get("source_type") == "arxiv":
+                content = ARXIV_SUMMARY_PROMPT.format(
+                    title=a["title"],
+                    link=a["link"],
+                    abstract=a.get("body_text") or a.get("summary", ""),
+                )
+            else:
+                body = fetch_article_body(a["link"])
+                content = RSS_SUMMARY_PROMPT.format(
+                    title=a["title"],
+                    source_label=a["source_label"],
+                    company=company,
+                    link=a["link"],
+                    body_text=body or a.get("summary", ""),
+                )
             batch_requests.append({
                 "custom_id": f"rss-{len(rss_flat) - 1}",
                 "params": {
                     "model": MODEL,
                     "max_tokens": ITEM_SUMMARY_MAX_TOKENS,
-                    "messages": [{
-                        "role": "user",
-                        "content": RSS_SUMMARY_PROMPT.format(
-                            title=a["title"],
-                            source_label=a["source_label"],
-                            company=company,
-                            link=a["link"],
-                            body_text=body or a.get("summary", ""),
-                        ),
-                    }],
+                    "messages": [{"role": "user", "content": content}],
                 },
             })
 
@@ -250,6 +260,7 @@ def main() -> None:
     parser.add_argument("--rss-only", action="store_true", help="Skip Gmail fetcher")
     parser.add_argument("--skip-summarize", action="store_true", help="Print raw items without summarizing")
     parser.add_argument("--skip-twitter", action="store_true", help="Skip Twitter digest")
+    parser.add_argument("--arxiv-only", action="store_true", help="Only include arXiv papers, skip all other sources")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -266,6 +277,7 @@ def main() -> None:
             dry_run=args.dry_run,
             rss_only=args.rss_only,
             skip_summarize=args.skip_summarize,
+            arxiv_only=args.arxiv_only,
         )
     except Exception:
         logger.exception("Digest pipeline failed")

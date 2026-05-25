@@ -19,6 +19,7 @@ REQUEST_TIMEOUT = 15
 HEADERS = {"User-Agent": "IndustryNewsDigest/1.0"}
 ARTICLE_BODY_MAX_CHARS = 8_000
 FEED_MAX_ENTRIES = 10
+ARXIV_MAX_ENTRIES = 100
 FEED_REQUEST_DELAY_SECS = 0.5
 SUMMARY_FALLBACK_MAX_CHARS = 2_000
 SCRAPE_SNIPPET_MAX_CHARS = 500
@@ -35,6 +36,73 @@ _KNOWN_CATEGORIES = sorted([
     "Safety", "Announcements", "Announcement", "Company",
     "Enterprise", "Security", "Customers", "Customer",
 ], key=len, reverse=True)
+
+
+def _matches_arxiv_exclude(title: str, exclude_keywords: list[str]) -> bool:
+    """Return True if the title matches any exclude keyword (case-insensitive)."""
+    lower = title.lower()
+    return any(kw.lower() in lower for kw in exclude_keywords)
+
+
+def _strip_arxiv_title(title: str) -> str:
+    """Remove the trailing arXiv ID suffix, e.g. '(arXiv:2401.12345v1 [cs.AI])'."""
+    return re.sub(r"\s*\(arXiv:[^\)]+\)\s*$", "", title).strip()
+
+
+def _fetch_arxiv_feed(
+    url: str,
+    label: str,
+    cutoff: datetime,
+    prev_links: set[str],
+    seen_links: set[str],
+    exclude_keywords: list[str],
+) -> list[dict]:
+    """Fetch papers from an arXiv RSS feed, applying title-based exclude filtering."""
+    articles = []
+    try:
+        parsed = feedparser.parse(url, agent=HEADERS["User-Agent"])
+        if parsed.bozo and not parsed.entries:
+            logger.warning(
+                "Feed error for %s (%s): %s", label, url, parsed.bozo_exception
+            )
+            return articles
+
+        for entry in parsed.entries[:ARXIV_MAX_ENTRIES]:
+            link = getattr(entry, "link", "").rstrip("/")
+            if not link or link in prev_links or link in seen_links:
+                continue
+
+            published = _parse_entry_time(entry)
+            if published and published < cutoff:
+                continue
+
+            raw_title = getattr(entry, "title", "Untitled")
+            clean_title = _strip_arxiv_title(raw_title)
+
+            if _matches_arxiv_exclude(clean_title, exclude_keywords):
+                continue
+
+            abstract_raw = (
+                getattr(entry, "summary", "")
+                or getattr(entry, "description", "")
+                or ""
+            )
+            abstract = _truncate(_strip_html(abstract_raw), SUMMARY_FALLBACK_MAX_CHARS)
+
+            seen_links.add(link)
+            articles.append({
+                "title": clean_title or raw_title,
+                "link": link,
+                "summary": abstract,
+                "body_text": abstract,
+                "source_label": label,
+                "published": published.isoformat() if published else "unknown",
+                "category": "",
+                "source_type": "arxiv",
+            })
+    except Exception:
+        logger.exception("Failed to fetch arXiv feed: %s (%s)", label, url)
+    return articles
 
 
 def fetch_article_body(url: str) -> str:
@@ -270,6 +338,26 @@ def fetch_rss_articles(hours: int = 24) -> dict[str, list[dict]]:
         if articles:
             results[company] = articles
             all_links.extend(a["link"] for a in articles)
+
+    arxiv_config = config.get("arxiv", {})
+    if arxiv_config:
+        exclude_kw = arxiv_config.get("exclude_keywords", [])
+        seen_arxiv_links: set[str] = set()
+        arxiv_articles = []
+        for feed_info in arxiv_config.get("feeds", []):
+            new = _fetch_arxiv_feed(
+                feed_info["url"],
+                feed_info["label"],
+                cutoff,
+                prev_links,
+                seen_arxiv_links,
+                exclude_kw,
+            )
+            arxiv_articles.extend(new)
+            time.sleep(FEED_REQUEST_DELAY_SECS)
+        if arxiv_articles:
+            results["arxiv"] = arxiv_articles
+            all_links.extend(a["link"] for a in arxiv_articles)
 
     for company, pages in config.get("scrape", {}).items():
         articles = []

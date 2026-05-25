@@ -32,6 +32,30 @@ feeds:
     - url: "https://sequoiacap.com/feed/"
       label: "Sequoia Capital"
 
+arxiv:
+  exclude_keywords:
+    - image
+    - vision
+    - visual
+    - multimodal
+    - video
+    - pixel
+    - diffusion
+    - object detection
+    - segmentation
+    - medical imaging
+    - text-to-image
+    - speech recognition
+    - 3D reconstruction
+    - autonomous driving
+  feeds:
+    - url: "https://rss.arxiv.org/rss/cs.AI"
+      label: "arXiv cs.AI"
+    - url: "https://rss.arxiv.org/rss/cs.MA"
+      label: "arXiv cs.MA"
+    - url: "https://rss.arxiv.org/rss/cs.CL"
+      label: "arXiv cs.CL"
+
 # Blog pages without native RSS feeds — fetched via HTML scraping
 scrape:
   perplexity:

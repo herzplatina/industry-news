@@ -52,6 +52,16 @@ NEWSLETTER_SUMMARY_PROMPT = (
     "{body_text}"
 )
 
+ARXIV_SUMMARY_PROMPT = (
+    "Summarize this research paper in 2 sentences: what it does and its key contribution. "
+    "Then add 1 sentence explaining why it matters for practitioners building LLM agent systems, "
+    "orchestration frameworks, or agent harnesses. "
+    "Write in plain prose, no bullet points.\n\n"
+    "Title: {title}\n"
+    "Link: {link}\n\n"
+    "{abstract}"
+)
+
 RSS_SUMMARY_PROMPT = (
     "Summarize this article in approximately 200 words. "
     "Preserve all key facts, names, numbers, and conclusions. "
