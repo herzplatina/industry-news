@@ -28,14 +28,35 @@ _DATE_PATTERN = re.compile(
     r"((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4})"
 )
 
-_KNOWN_CATEGORIES = sorted([
-    "Cross-Industry", "Societal Impacts", "Societal Impact",
-    "AI Agents", "AI Agent", "AI Assistant",
-    "Policy", "Research", "Productivity", "Product", "Government", "Alignment",
-    "Technology", "Sales", "Engineering",
-    "Safety", "Announcements", "Announcement", "Company",
-    "Enterprise", "Security", "Customers", "Customer",
-], key=len, reverse=True)
+_KNOWN_CATEGORIES = sorted(
+    [
+        "Cross-Industry",
+        "Societal Impacts",
+        "Societal Impact",
+        "AI Agents",
+        "AI Agent",
+        "AI Assistant",
+        "Policy",
+        "Research",
+        "Productivity",
+        "Product",
+        "Government",
+        "Alignment",
+        "Technology",
+        "Sales",
+        "Engineering",
+        "Safety",
+        "Announcements",
+        "Announcement",
+        "Company",
+        "Enterprise",
+        "Security",
+        "Customers",
+        "Customer",
+    ],
+    key=len,
+    reverse=True,
+)
 
 
 def _matches_arxiv_exclude(title: str, exclude_keywords: list[str]) -> bool:
@@ -83,23 +104,23 @@ def _fetch_arxiv_feed(
                 continue
 
             abstract_raw = (
-                getattr(entry, "summary", "")
-                or getattr(entry, "description", "")
-                or ""
+                getattr(entry, "summary", "") or getattr(entry, "description", "") or ""
             )
             abstract = _truncate(_strip_html(abstract_raw), SUMMARY_FALLBACK_MAX_CHARS)
 
             seen_links.add(link)
-            articles.append({
-                "title": clean_title or raw_title,
-                "link": link,
-                "summary": abstract,
-                "body_text": abstract,
-                "source_label": label,
-                "published": published.isoformat() if published else "unknown",
-                "category": "",
-                "source_type": "arxiv",
-            })
+            articles.append(
+                {
+                    "title": clean_title or raw_title,
+                    "link": link,
+                    "summary": abstract,
+                    "body_text": abstract,
+                    "source_label": label,
+                    "published": published.isoformat() if published else "unknown",
+                    "category": "",
+                    "source_type": "arxiv",
+                }
+            )
     except Exception:
         logger.exception("Failed to fetch arXiv feed: %s (%s)", label, url)
     return articles
@@ -156,7 +177,7 @@ def _parse_scraped_title(raw_title: str) -> tuple[str, str, str]:
     date_match = _DATE_PATTERN.search(text)
     if date_match:
         date = date_match.group(1)
-        text = text[:date_match.start()] + text[date_match.end():]
+        text = text[: date_match.start()] + text[date_match.end() :]
         text = text.strip()
 
     changed = True
@@ -165,7 +186,7 @@ def _parse_scraped_title(raw_title: str) -> tuple[str, str, str]:
         for cat in _KNOWN_CATEGORIES:
             if text.startswith(cat):
                 categories.append(cat)
-                text = text[len(cat):].strip()
+                text = text[len(cat) :].strip()
                 changed = True
                 break
 
@@ -202,19 +223,19 @@ def _fetch_rss_feed(
             date_str, category, clean_title = _parse_scraped_title(raw_title)
 
             summary_raw = (
-                getattr(entry, "summary", "")
-                or getattr(entry, "description", "")
-                or ""
+                getattr(entry, "summary", "") or getattr(entry, "description", "") or ""
             )
             summary = _truncate(_strip_html(summary_raw), SUMMARY_FALLBACK_MAX_CHARS)
-            articles.append({
-                "title": clean_title or raw_title,
-                "link": link,
-                "summary": summary,
-                "source_label": label,
-                "published": published.isoformat() if published else "unknown",
-                "category": category,
-            })
+            articles.append(
+                {
+                    "title": clean_title or raw_title,
+                    "link": link,
+                    "summary": summary,
+                    "source_label": label,
+                    "published": published.isoformat() if published else "unknown",
+                    "category": category,
+                }
+            )
     except Exception:
         logger.exception("Failed to fetch feed: %s (%s)", label, url)
     return articles
@@ -291,27 +312,29 @@ def _scrape_blog_page(
                 slug_words = len(slug.replace("-", " ").split())
                 words = clean_title.split()
                 if slug_words >= 3 and slug_words < len(words):
-                    title = " ".join(words[:slug_words + 2])
-                    summary = " ".join(words[slug_words + 2:])
+                    title = " ".join(words[: slug_words + 2])
+                    summary = " ".join(words[slug_words + 2 :])
                 else:
                     for sep in [". ", "—", " - "]:
                         idx = clean_title.find(sep, 20)
                         if 20 < idx < 150:
                             title = clean_title[:idx].rstrip(".")
-                            summary = clean_title[idx + len(sep):]
+                            summary = clean_title[idx + len(sep) :]
                             break
                     else:
                         title = clean_title[:80].rsplit(" ", 1)[0]
-                        summary = clean_title[len(title):].strip()
+                        summary = clean_title[len(title) :].strip()
 
-            articles.append({
-                "title": title,
-                "link": full_url,
-                "summary": _truncate(summary, SCRAPE_SNIPPET_MAX_CHARS),
-                "source_label": label,
-                "published": date_str or "unknown",
-                "category": category,
-            })
+            articles.append(
+                {
+                    "title": title,
+                    "link": full_url,
+                    "summary": _truncate(summary, SCRAPE_SNIPPET_MAX_CHARS),
+                    "source_label": label,
+                    "published": date_str or "unknown",
+                    "category": category,
+                }
+            )
     except Exception:
         logger.exception("Failed to scrape blog: %s (%s)", label, url)
     return articles
@@ -385,4 +408,3 @@ def fetch_rss_articles(hours: int = 24) -> dict[str, list[dict]]:
     save_checkpoint(checkpoint)
 
     return results
-

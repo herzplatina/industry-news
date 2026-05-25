@@ -81,8 +81,9 @@ To add a new source, add an entry under the appropriate key. No code changes nee
 
 ## Pre-Commit Checklist (MANDATORY)
 
-Before every `git commit`, run all three of these skills in order — no exceptions:
+Before every `git commit`, run all four of these in order — no exceptions:
 
+0. `ruff check --fix src/ && ruff format src/` — auto-fix lint and format all Python files
 1. `/techdebt` — find and kill duplicated or dead code
 2. `/grill` — adversarial code review; do not commit until it passes
 3. `/test-and-fix` — run tests and fix any failures

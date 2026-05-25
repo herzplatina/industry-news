@@ -45,7 +45,12 @@ def run_digest(
         if arxiv_only:
             rss_articles = {k: v for k, v in rss_articles.items() if k == "arxiv"}
         rss_count = sum(len(v) for v in rss_articles.values())
-        logger.info("RSS: %d articles from %d sources (%.1fs)", rss_count, len(rss_articles), time.time() - start)
+        logger.info(
+            "RSS: %d articles from %d sources (%.1fs)",
+            rss_count,
+            len(rss_articles),
+            time.time() - start,
+        )
     except Exception:
         logger.exception("RSS fetcher failed")
 
@@ -61,9 +66,13 @@ def run_digest(
             merged_ids = list(prev_message_ids | set(new_message_ids))
             checkpoint["newsletter_message_ids"] = merged_ids
             save_checkpoint(checkpoint)
-            logger.info("Gmail: %d newsletters (%.1fs)", len(newsletters), time.time() - start)
+            logger.info(
+                "Gmail: %d newsletters (%.1fs)", len(newsletters), time.time() - start
+            )
         except FileNotFoundError:
-            logger.warning("Gmail OAuth not configured — skipping. Set up credentials.json to enable.")
+            logger.warning(
+                "Gmail OAuth not configured — skipping. Set up credentials.json to enable."
+            )
         except Exception:
             logger.exception("Gmail fetcher failed")
 
@@ -87,25 +96,31 @@ def run_digest(
 
     batch_requests = []
     for i, n in enumerate(newsletters):
-        batch_requests.append({
-            "custom_id": f"newsletter-{i}",
-            "params": {
-                "model": MODEL,
-                "max_tokens": ITEM_SUMMARY_MAX_TOKENS,
-                "messages": [{
-                    "role": "user",
-                    "content": NEWSLETTER_SUMMARY_PROMPT.format(
-                        subject=n["subject"],
-                        sender=n["sender"],
-                        body_text=n["body_text"],
-                    ),
-                }],
-            },
-        })
+        batch_requests.append(
+            {
+                "custom_id": f"newsletter-{i}",
+                "params": {
+                    "model": MODEL,
+                    "max_tokens": ITEM_SUMMARY_MAX_TOKENS,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": NEWSLETTER_SUMMARY_PROMPT.format(
+                                subject=n["subject"],
+                                sender=n["sender"],
+                                body_text=n["body_text"],
+                            ),
+                        }
+                    ],
+                },
+            }
+        )
 
     rss_flat = []
     non_arxiv = {k: v for k, v in rss_articles.items() if k != "arxiv"}
-    logger.info("Fetching %d article bodies...", sum(len(v) for v in non_arxiv.values()))
+    logger.info(
+        "Fetching %d article bodies...", sum(len(v) for v in non_arxiv.values())
+    )
     for company, articles in rss_articles.items():
         for a in articles:
             rss_flat.append((company, a))
@@ -124,17 +139,21 @@ def run_digest(
                     link=a["link"],
                     body_text=body or a.get("summary", ""),
                 )
-            batch_requests.append({
-                "custom_id": f"rss-{len(rss_flat) - 1}",
-                "params": {
-                    "model": MODEL,
-                    "max_tokens": ITEM_SUMMARY_MAX_TOKENS,
-                    "messages": [{"role": "user", "content": content}],
-                },
-            })
+            batch_requests.append(
+                {
+                    "custom_id": f"rss-{len(rss_flat) - 1}",
+                    "params": {
+                        "model": MODEL,
+                        "max_tokens": ITEM_SUMMARY_MAX_TOKENS,
+                        "messages": [{"role": "user", "content": content}],
+                    },
+                }
+            )
 
     if batch_requests:
-        logger.info("Summarizing %d items individually via batch...", len(batch_requests))
+        logger.info(
+            "Summarizing %d items individually via batch...", len(batch_requests)
+        )
         batch = client.messages.batches.create(requests=batch_requests)
         logger.info("Summary batch created: %s", batch.id)
         while batch.processing_status != "ended":
@@ -159,7 +178,9 @@ def run_digest(
                 if result.result.type == "succeeded":
                     rss_summaries[link] = result.result.message.content[0].text
                 else:
-                    logger.warning("Failed to summarize RSS article: %s", article["title"])
+                    logger.warning(
+                        "Failed to summarize RSS article: %s", article["title"]
+                    )
                     rss_summaries[link] = article.get("summary", "")
     logger.info("Individual summaries complete")
 
@@ -178,7 +199,9 @@ def run_digest(
         send_arxiv_digest(arxiv_markdown, dry_run=dry_run)
 
     # --- Regular digest (company RSS + newsletters) ---
-    non_arxiv_total = sum(len(v) for v in non_arxiv_articles.values()) + len(newsletters)
+    non_arxiv_total = sum(len(v) for v in non_arxiv_articles.values()) + len(
+        newsletters
+    )
     if non_arxiv_total == 0:
         logger.info("No non-arXiv content for regular digest.")
         return
@@ -227,7 +250,12 @@ def run_twitter_digest(hours: int = 36, dry_run: bool = False) -> None:
     try:
         tweets_by_handle = fetch_tweets(hours=hours)
         total = sum(len(v) for v in tweets_by_handle.values())
-        logger.info("Twitter: %d tweets from %d accounts (%.1fs)", total, len(tweets_by_handle), time.time() - start)
+        logger.info(
+            "Twitter: %d tweets from %d accounts (%.1fs)",
+            total,
+            len(tweets_by_handle),
+            time.time() - start,
+        )
     except Exception:
         logger.exception("Twitter fetcher failed")
         return
@@ -276,12 +304,26 @@ def run_twitter_digest(hours: int = 36, dry_run: bool = False) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Industry News Digest")
-    parser.add_argument("--dry-run", action="store_true", help="Print digest without sending email")
-    parser.add_argument("--hours", type=int, default=36, help="Time window in hours (default: 36)")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Print digest without sending email"
+    )
+    parser.add_argument(
+        "--hours", type=int, default=36, help="Time window in hours (default: 36)"
+    )
     parser.add_argument("--rss-only", action="store_true", help="Skip Gmail fetcher")
-    parser.add_argument("--skip-summarize", action="store_true", help="Print raw items without summarizing")
-    parser.add_argument("--skip-twitter", action="store_true", help="Skip Twitter digest")
-    parser.add_argument("--arxiv-only", action="store_true", help="Only include arXiv papers, skip all other sources")
+    parser.add_argument(
+        "--skip-summarize",
+        action="store_true",
+        help="Print raw items without summarizing",
+    )
+    parser.add_argument(
+        "--skip-twitter", action="store_true", help="Skip Twitter digest"
+    )
+    parser.add_argument(
+        "--arxiv-only",
+        action="store_true",
+        help="Only include arXiv papers, skip all other sources",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(

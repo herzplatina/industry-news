@@ -108,7 +108,7 @@ def _format_rss_content(
             parts.append(f"Link: {a['link']}")
             parts.append(f"Source: {a['source_label']}")
             parts.append(f"Published: {a['published']}")
-            summary = (rss_summaries or {}).get(a['link'], a.get('summary', ''))
+            summary = (rss_summaries or {}).get(a["link"], a.get("summary", ""))
             if summary:
                 parts.append(f"Summary: {summary}")
             parts.append("")
@@ -156,17 +156,23 @@ def summarize_content(
         )
 
     user_content = "\n\n---\n\n".join(user_parts)
-    user_content += "\n\nPlease produce today's industry news digest based on the above content."
+    user_content += (
+        "\n\nPlease produce today's industry news digest based on the above content."
+    )
 
-    batch = client.messages.batches.create(requests=[{
-        "custom_id": "digest",
-        "params": {
-            "model": MODEL,
-            "max_tokens": DIGEST_MAX_TOKENS,
-            "system": SYSTEM_PROMPT,
-            "messages": [{"role": "user", "content": user_content}],
-        },
-    }])
+    batch = client.messages.batches.create(
+        requests=[
+            {
+                "custom_id": "digest",
+                "params": {
+                    "model": MODEL,
+                    "max_tokens": DIGEST_MAX_TOKENS,
+                    "system": SYSTEM_PROMPT,
+                    "messages": [{"role": "user", "content": user_content}],
+                },
+            }
+        ]
+    )
     logger.info("Digest batch created: %s", batch.id)
 
     while batch.processing_status != "ended":
@@ -208,15 +214,19 @@ def summarize_arxiv_content(
         + "\n\nPlease produce today's AI research digest based on the above papers."
     )
 
-    batch = client.messages.batches.create(requests=[{
-        "custom_id": "arxiv-digest",
-        "params": {
-            "model": MODEL,
-            "max_tokens": DIGEST_MAX_TOKENS,
-            "system": ARXIV_DIGEST_SYSTEM_PROMPT,
-            "messages": [{"role": "user", "content": user_content}],
-        },
-    }])
+    batch = client.messages.batches.create(
+        requests=[
+            {
+                "custom_id": "arxiv-digest",
+                "params": {
+                    "model": MODEL,
+                    "max_tokens": DIGEST_MAX_TOKENS,
+                    "system": ARXIV_DIGEST_SYSTEM_PROMPT,
+                    "messages": [{"role": "user", "content": user_content}],
+                },
+            }
+        ]
+    )
     logger.info("arXiv digest batch created: %s", batch.id)
 
     while batch.processing_status != "ended":
@@ -234,4 +244,3 @@ def summarize_arxiv_content(
             return msg.content[0].text
 
     raise RuntimeError("arXiv digest batch failed")
-

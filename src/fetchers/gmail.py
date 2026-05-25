@@ -109,11 +109,21 @@ def _extract_urls(html: str) -> list[str]:
                 url = unquote(qs["url"][0])
 
         # Skip non-article URLs
-        if any(skip in url for skip in [
-            "unsubscribe", "manage-preferences", "email-settings",
-            "mailto:", "javascript:", "#", "beacon", "pixel",
-            "list-manage.com", "mailchimp.com",
-        ]):
+        if any(
+            skip in url
+            for skip in [
+                "unsubscribe",
+                "manage-preferences",
+                "email-settings",
+                "mailto:",
+                "javascript:",
+                "#",
+                "beacon",
+                "pixel",
+                "list-manage.com",
+                "mailchimp.com",
+            ]
+        ):
             continue
 
         parsed = urlparse(url)
@@ -160,7 +170,8 @@ def fetch_gmail_newsletters(
     fetched_ids = []
     try:
         response = (
-            service.users().messages()
+            service.users()
+            .messages()
             .list(userId="me", q=query, maxResults=GMAIL_MAX_RESULTS)
             .execute()
         )
@@ -171,13 +182,13 @@ def fetch_gmail_newsletters(
             if msg_id in prev_message_ids:
                 continue
             msg = (
-                service.users().messages()
+                service.users()
+                .messages()
                 .get(userId="me", id=msg_id, format="full")
                 .execute()
             )
             headers = {
-                h["name"].lower(): h["value"]
-                for h in msg["payload"].get("headers", [])
+                h["name"].lower(): h["value"] for h in msg["payload"].get("headers", [])
             }
 
             body_text, body_html = _decode_body(msg["payload"])
@@ -190,17 +201,18 @@ def fetch_gmail_newsletters(
             urls = _extract_urls(body_html) if body_html else []
 
             cleaned = _clean_body(body_text)
-            newsletters.append({
-                "message_id": msg_id,
-                "subject": headers.get("subject", "No Subject"),
-                "sender": headers.get("from", "Unknown"),
-                "date": headers.get("date", "Unknown"),
-                "body_text": cleaned,
-                "urls": urls,
-            })
+            newsletters.append(
+                {
+                    "message_id": msg_id,
+                    "subject": headers.get("subject", "No Subject"),
+                    "sender": headers.get("from", "Unknown"),
+                    "date": headers.get("date", "Unknown"),
+                    "body_text": cleaned,
+                    "urls": urls,
+                }
+            )
             fetched_ids.append(msg_id)
     except Exception:
         logger.exception("Failed to fetch Gmail newsletters")
 
     return newsletters, fetched_ids
-

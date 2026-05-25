@@ -45,7 +45,8 @@ def _fetch_page_title(url: str) -> str | None:
     """Fetch page title from a URL via <title> tag or og:title meta."""
     try:
         resp = requests.get(
-            url, timeout=5,
+            url,
+            timeout=5,
             headers={"User-Agent": "Twitterbot/1.0"},
             allow_redirects=True,
         )
@@ -82,9 +83,8 @@ def _unfurl_tweet_text(text: str, entities: dict) -> str:
         if tco_url not in text:
             continue
         # Skip media links (photos/videos) — just remove the t.co link
-        is_media = (
-            url_entity.get("media_key")
-            or "pic.x.com" in url_entity.get("display_url", "")
+        is_media = url_entity.get("media_key") or "pic.x.com" in url_entity.get(
+            "display_url", ""
         )
         if is_media:
             text = text.replace(tco_url, "")
@@ -116,7 +116,9 @@ def _get_user_id(handle: str, headers: dict[str, str]) -> str | None:
         timeout=10,
     )
     if resp.status_code != 200:
-        logger.warning("Failed to look up @%s: %s — %s", handle, resp.status_code, resp.text)
+        logger.warning(
+            "Failed to look up @%s: %s — %s", handle, resp.status_code, resp.text
+        )
         return None
     return resp.json().get("data", {}).get("id")
 
@@ -137,20 +139,27 @@ def _get_tweets(
         timeout=10,
     )
     if resp.status_code != 200:
-        logger.warning("Failed to fetch tweets for @%s: %s — %s", handle, resp.status_code, resp.text)
+        logger.warning(
+            "Failed to fetch tweets for @%s: %s — %s",
+            handle,
+            resp.status_code,
+            resp.text,
+        )
         return []
 
     tweets = []
     for tweet in resp.json().get("data", []):
         entities = tweet.get("entities", {})
-        tweets.append({
-            "handle": handle,
-            "text": _unfurl_tweet_text(tweet["text"], entities),
-            "created_at": tweet["created_at"],
-            "likes": tweet.get("public_metrics", {}).get("like_count", 0),
-            "retweets": tweet.get("public_metrics", {}).get("retweet_count", 0),
-            "url": f"https://x.com/{handle}/status/{tweet['id']}",
-        })
+        tweets.append(
+            {
+                "handle": handle,
+                "text": _unfurl_tweet_text(tweet["text"], entities),
+                "created_at": tweet["created_at"],
+                "likes": tweet.get("public_metrics", {}).get("like_count", 0),
+                "retweets": tweet.get("public_metrics", {}).get("retweet_count", 0),
+                "url": f"https://x.com/{handle}/status/{tweet['id']}",
+            }
+        )
     return tweets
 
 
@@ -172,4 +181,3 @@ def fetch_tweets(hours: int = 36) -> dict[str, list[dict]]:
         logger.info("@%s: %d tweets", handle, len(tweets))
 
     return results
-
