@@ -38,6 +38,27 @@ Rules:
 - Write in a professional, neutral tone
 """
 
+ARXIV_DIGEST_SYSTEM_PROMPT = """You are an AI research curator for engineers building LLM agent systems, orchestration frameworks, and agent harnesses. Given today's arXiv papers, produce a concise research digest.
+
+Group papers thematically — use only sections where you have papers:
+
+## Agent Architectures & Frameworks
+## Multi-Agent Systems & Collaboration
+## Memory, Retrieval & Context
+## Planning & Reasoning
+## Tool Use & Orchestration
+## Benchmarks & Evaluation
+## Protocols & Communication
+## Other Relevant Work
+
+Rules:
+- Each paper: title as a clickable link [Title](url), then 2-3 sentences — what it does, its key contribution, and why it matters for agent/LLM builders
+- Skip papers not meaningfully relevant to agent systems even if they passed keyword filtering
+- If a section would have fewer than 2 papers, fold them into the closest related section
+- No filler — shorter is better than padding
+- Professional, direct tone
+"""
+
 MODEL = "claude-haiku-4-5-20251001"
 ITEM_SUMMARY_MAX_TOKENS = 400
 DIGEST_MAX_TOKENS = 4096
@@ -163,4 +184,54 @@ def summarize_content(
             return msg.content[0].text
 
     raise RuntimeError("Digest batch failed")
+
+
+def summarize_arxiv_content(
+    arxiv_articles: list[dict],
+    arxiv_summaries: dict[str, str] | None = None,
+) -> str:
+    load_dotenv()
+    client = anthropic.Anthropic()
+
+    parts = []
+    for a in arxiv_articles:
+        parts.append(f"Title: {a['title']}")
+        parts.append(f"Link: {a['link']}")
+        summary = (arxiv_summaries or {}).get(a["link"], a.get("summary", ""))
+        if summary:
+            parts.append(f"Summary: {summary}")
+        parts.append("")
+
+    user_content = (
+        "# Today's arXiv Papers\n\n"
+        + "\n".join(parts)
+        + "\n\nPlease produce today's AI research digest based on the above papers."
+    )
+
+    batch = client.messages.batches.create(requests=[{
+        "custom_id": "arxiv-digest",
+        "params": {
+            "model": MODEL,
+            "max_tokens": DIGEST_MAX_TOKENS,
+            "system": ARXIV_DIGEST_SYSTEM_PROMPT,
+            "messages": [{"role": "user", "content": user_content}],
+        },
+    }])
+    logger.info("arXiv digest batch created: %s", batch.id)
+
+    while batch.processing_status != "ended":
+        time.sleep(BATCH_POLL_INTERVAL_SECS)
+        batch = client.messages.batches.retrieve(batch.id)
+
+    for result in client.messages.batches.results(batch.id):
+        if result.result.type == "succeeded":
+            msg = result.result.message
+            logger.info(
+                "arXiv token usage — input: %d, output: %d",
+                msg.usage.input_tokens,
+                msg.usage.output_tokens,
+            )
+            return msg.content[0].text
+
+    raise RuntimeError("arXiv digest batch failed")
 

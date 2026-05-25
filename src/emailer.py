@@ -80,6 +80,18 @@ def send_digest(
     )
 
 
+def send_arxiv_digest(
+    markdown_content: str,
+    dry_run: bool = False,
+) -> bool:
+    load_dotenv()
+    timestamp = datetime.now(_PT).strftime("%b %d, %Y")
+    subject = f"AI Research Digest — {timestamp}"
+    return _prepare_and_send(
+        markdown_content, subject, Path("arxiv_digest_preview.html"), dry_run, None
+    )
+
+
 def send_twitter_digest(
     markdown_content: str,
     dry_run: bool = False,

@@ -12,6 +12,7 @@ from src.fetchers.gmail import fetch_gmail_newsletters
 from src.fetchers.twitter import fetch_tweets
 from src.summarizer import (
     summarize_content,
+    summarize_arxiv_content,
     MODEL,
     ITEM_SUMMARY_MAX_TOKENS,
     BATCH_POLL_INTERVAL_SECS,
@@ -20,7 +21,7 @@ from src.summarizer import (
     ARXIV_SUMMARY_PROMPT,
 )
 
-from src.emailer import send_digest, send_twitter_digest
+from src.emailer import send_digest, send_arxiv_digest, send_twitter_digest
 
 logger = logging.getLogger(__name__)
 
@@ -162,8 +163,28 @@ def run_digest(
                     rss_summaries[link] = article.get("summary", "")
     logger.info("Individual summaries complete")
 
+    # Split arXiv from regular RSS for separate digest emails
+    arxiv_articles = rss_articles.pop("arxiv", [])
+    non_arxiv_articles = rss_articles  # mutated in-place
+
+    # --- arXiv digest ---
+    if arxiv_articles:
+        logger.info("Generating arXiv digest for %d papers...", len(arxiv_articles))
+        start = time.time()
+        arxiv_markdown = summarize_arxiv_content(arxiv_articles, rss_summaries)
+        logger.info("arXiv digest complete (%.1fs)", time.time() - start)
+        if dry_run:
+            print("\n=== arXiv DIGEST ===\n" + arxiv_markdown)
+        send_arxiv_digest(arxiv_markdown, dry_run=dry_run)
+
+    # --- Regular digest (company RSS + newsletters) ---
+    non_arxiv_total = sum(len(v) for v in non_arxiv_articles.values()) + len(newsletters)
+    if non_arxiv_total == 0:
+        logger.info("No non-arXiv content for regular digest.")
+        return
+
     raw_parts = []
-    for company, articles in rss_articles.items():
+    for company, articles in non_arxiv_articles.items():
         raw_parts.append(f"### RSS: {company.upper()}\n")
         for a in articles:
             category = f" *[{a['category']}]*" if a.get("category") else ""
@@ -183,19 +204,19 @@ def run_digest(
         raw_parts.append("")
     raw_sources = "\n".join(raw_parts)
 
-    logger.info("Summarizing %d items with Claude...", total)
+    logger.info("Generating industry digest for %d items...", non_arxiv_total)
     start = time.time()
     digest_markdown = summarize_content(
-        rss_articles, newsletters, newsletter_summaries, rss_summaries
+        non_arxiv_articles, newsletters, newsletter_summaries, rss_summaries
     )
-    logger.info("Summarization complete (%.1fs)", time.time() - start)
+    logger.info("Industry digest complete (%.1fs)", time.time() - start)
 
     if dry_run:
-        print("\n" + digest_markdown)
+        print("\n=== INDUSTRY DIGEST ===\n" + digest_markdown)
         send_digest(digest_markdown, dry_run=True, raw_sources=raw_sources)
         return
 
-    logger.info("Sending digest email...")
+    logger.info("Sending industry digest email...")
     send_digest(digest_markdown, raw_sources=raw_sources)
     logger.info("Done.")
 

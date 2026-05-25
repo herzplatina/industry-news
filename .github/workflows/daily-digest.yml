@@ -61,5 +61,6 @@ jobs:
           name: digest-previews
           path: |
             digest_preview.html
+            arxiv_digest_preview.html
             twitter_digest_preview.html
           retention-days: 7
