@@ -79,6 +79,16 @@ To add a new source, add an entry under the appropriate key. No code changes nee
 
 `config/twitter.yaml` — list of `{handle}` objects.
 
+## Pre-Commit Checklist (MANDATORY)
+
+Before every `git commit`, run all three of these skills in order — no exceptions:
+
+1. `/techdebt` — find and kill duplicated or dead code
+2. `/grill` — adversarial code review; do not commit until it passes
+3. `/test-and-fix` — run tests and fix any failures
+
+Do not commit if any of them surface unresolved issues.
+
 ## Key design notes
 
 - Both the individual summarization step and the final digest use the Anthropic **Batch API** (async, polled until `processing_status == "ended"`). This keeps costs low but adds latency.

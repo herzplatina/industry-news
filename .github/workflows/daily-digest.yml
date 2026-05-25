@@ -3,7 +3,12 @@ name: Daily Industry Digest
 on:
   schedule:
     - cron: '0 14 * * *'  # 7 AM PT (UTC-7)
-  workflow_dispatch: # manual trigger
+  workflow_dispatch:
+    inputs:
+      extra_args:
+        description: 'Extra CLI args (e.g. --arxiv-only --skip-twitter --dry-run)'
+        required: false
+        default: ''
 
 jobs:
   send-digest:
@@ -40,7 +45,7 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           DIGEST_RECIPIENT_EMAIL: ${{ secrets.DIGEST_RECIPIENT_EMAIL }}
           TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
-        run: python -m src.main --hours 36
+        run: python -m src.main --hours 36 ${{ github.event.inputs.extra_args }}
 
       - name: Save checkpoint
         uses: actions/cache/save@v4
