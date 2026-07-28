@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 
 import anthropic
@@ -58,6 +59,96 @@ Rules:
 - No filler — shorter is better than padding
 - Professional, direct tone
 """
+
+ARXIV_CODING_SYSTEM_PROMPT = """You are an AI research curator highlighting papers relevant to software engineering and coding for engineers who build with LLMs. Given today's arXiv papers — all pre-selected as coding-related — produce a single focused section.
+
+Start the section with exactly this heading line:
+
+## 💻 Coding & Software Engineering Research
+
+Then, for each paper: title as a clickable link [Title](url), followed by 2-3 sentences — what it does, its key contribution, and why it matters for practitioners working on code generation, coding agents, code evaluation, or code models.
+
+Rules:
+- Do NOT add any other section headings — everything belongs under the single heading above
+- Order the most significant or broadly useful papers first
+- No filler — shorter is better than padding
+- Professional, direct tone
+"""
+
+# Substring keywords (case-insensitive) that mark an arXiv paper as coding-related:
+# code generation/evaluation, coding models, coding agents, and adjacent SE research.
+CODING_KEYWORDS = (
+    "coding",
+    "code generation",
+    "code completion",
+    "code synthesis",
+    "program synthesis",
+    "programming language",
+    "software engineering",
+    "software development",
+    "swe-bench",
+    "swebench",
+    "code llm",
+    "code language model",
+    "code model",
+    "codegen",
+    "humaneval",
+    "mbpp",
+    "code review",
+    "code search",
+    "code repair",
+    "program repair",
+    "bug fixing",
+    "bug detection",
+    "vulnerability detection",
+    "unit test generation",
+    "test generation",
+    "repository-level",
+    "pull request",
+    "static analysis",
+    "type inference",
+    "code understanding",
+    "code intelligence",
+    "source code",
+    "codebase",
+    "coding agent",
+    "coding assistant",
+    "compiler",
+)
+
+
+# Word-boundary match so "coding" does not fire on "encoding"/"decoding" and
+# "code" phrases do not fire on "encoder"/"barcode".
+_CODING_RE = re.compile(
+    r"\b(" + "|".join(re.escape(kw) for kw in CODING_KEYWORDS) + r")\b",
+    re.IGNORECASE,
+)
+
+
+def is_coding_paper(title: str, abstract: str = "") -> bool:
+    """Return True if the paper's title/abstract matches any coding keyword."""
+    return bool(_CODING_RE.search(f"{title}\n{abstract}"))
+
+
+def partition_coding_papers(
+    articles: list[dict],
+) -> tuple[list[dict], list[dict]]:
+    """Split papers into (coding-related, everything else), preserving order."""
+    coding, others = [], []
+    for a in articles:
+        text = a.get("summary") or a.get("body_text") or ""
+        if is_coding_paper(a.get("title", ""), text):
+            coding.append(a)
+        else:
+            others.append(a)
+    return coding, others
+
+
+def _assemble_arxiv_digest(coding_md: str, general_md: str) -> str:
+    """Join the coding section (top) and general digest, coding first."""
+    parts = [p.strip() for p in (coding_md, general_md) if p and p.strip()]
+    return "\n\n---\n\n".join(parts)
+
 
 MODEL = "claude-haiku-4-5-20251001"
 ITEM_SUMMARY_MAX_TOKENS = 400
@@ -192,6 +283,21 @@ def summarize_content(
     raise RuntimeError("Digest batch failed")
 
 
+def _format_arxiv_papers(
+    articles: list[dict],
+    arxiv_summaries: dict[str, str] | None = None,
+) -> str:
+    parts = []
+    for a in articles:
+        parts.append(f"Title: {a['title']}")
+        parts.append(f"Link: {a['link']}")
+        summary = (arxiv_summaries or {}).get(a["link"], a.get("summary", ""))
+        if summary:
+            parts.append(f"Summary: {summary}")
+        parts.append("")
+    return "\n".join(parts)
+
+
 def summarize_arxiv_content(
     arxiv_articles: list[dict],
     arxiv_summaries: dict[str, str] | None = None,
@@ -199,48 +305,78 @@ def summarize_arxiv_content(
     load_dotenv()
     client = anthropic.Anthropic()
 
-    parts = []
-    for a in arxiv_articles:
-        parts.append(f"Title: {a['title']}")
-        parts.append(f"Link: {a['link']}")
-        summary = (arxiv_summaries or {}).get(a["link"], a.get("summary", ""))
-        if summary:
-            parts.append(f"Summary: {summary}")
-        parts.append("")
+    # Coding papers are pulled into a dedicated section at the very top of the
+    # email; the rest form the thematic digest below.
+    coding_papers, other_papers = partition_coding_papers(arxiv_articles)
 
-    user_content = (
-        "# Today's arXiv Papers\n\n"
-        + "\n".join(parts)
-        + "\n\nPlease produce today's AI research digest based on the above papers."
-    )
-
-    batch = client.messages.batches.create(
-        requests=[
+    requests = []
+    if coding_papers:
+        requests.append(
+            {
+                "custom_id": "arxiv-coding",
+                "params": {
+                    "model": MODEL,
+                    "max_tokens": DIGEST_MAX_TOKENS,
+                    "system": ARXIV_CODING_SYSTEM_PROMPT,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "# Today's coding-related arXiv Papers\n\n"
+                            + _format_arxiv_papers(coding_papers, arxiv_summaries)
+                            + "\n\nPlease produce the coding research section.",
+                        }
+                    ],
+                },
+            }
+        )
+    if other_papers:
+        requests.append(
             {
                 "custom_id": "arxiv-digest",
                 "params": {
                     "model": MODEL,
                     "max_tokens": DIGEST_MAX_TOKENS,
                     "system": ARXIV_DIGEST_SYSTEM_PROMPT,
-                    "messages": [{"role": "user", "content": user_content}],
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "# Today's arXiv Papers\n\n"
+                            + _format_arxiv_papers(other_papers, arxiv_summaries)
+                            + "\n\nPlease produce today's AI research digest based on the above papers.",
+                        }
+                    ],
                 },
             }
-        ]
-    )
+        )
+
+    if not requests:
+        return ""
+
+    batch = client.messages.batches.create(requests=requests)
     logger.info("arXiv digest batch created: %s", batch.id)
 
     while batch.processing_status != "ended":
         time.sleep(BATCH_POLL_INTERVAL_SECS)
         batch = client.messages.batches.retrieve(batch.id)
 
+    sections: dict[str, str] = {}
     for result in client.messages.batches.results(batch.id):
         if result.result.type == "succeeded":
             msg = result.result.message
             logger.info(
-                "arXiv token usage — input: %d, output: %d",
+                "arXiv token usage (%s) — input: %d, output: %d",
+                result.custom_id,
                 msg.usage.input_tokens,
                 msg.usage.output_tokens,
             )
-            return msg.content[0].text
+            sections[result.custom_id] = msg.content[0].text
+        else:
+            logger.warning("arXiv digest section failed: %s", result.custom_id)
 
-    raise RuntimeError("arXiv digest batch failed")
+    if not sections:
+        raise RuntimeError("arXiv digest batch failed")
+
+    # Coding section is always placed first.
+    return _assemble_arxiv_digest(
+        sections.get("arxiv-coding", ""), sections.get("arxiv-digest", "")
+    )
