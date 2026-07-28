@@ -48,6 +48,7 @@ src/summarizer.py    — Claude Haiku batch summarization; holds all prompt cons
 src/emailer.py       — renders HTML via Jinja2 + sends via Gmail SMTP
 src/fetchers/
   rss.py             — fetches RSS feeds + scrapes blog pages without RSS
+  anthropic_blog.py  — discovers new Anthropic company blog posts via web search (no RSS)
   gmail.py           — reads newsletters from Gmail via Google API
   twitter.py         — fetches tweets via Twitter API v2
 config/
@@ -60,6 +61,7 @@ templates/
 
 **Pipeline flow:**
 1. RSS + scrape fetcher: fetches up to 10 articles per feed, filters by `--hours` cutoff, skips links already in checkpoint
+1. Anthropic blog fetcher: finds new posts on anthropic.com/news via web search (no RSS feed exists), deduped against the same link checkpoint
 2. Gmail fetcher: queries allowed senders, decodes MIME, extracts article URLs from HTML
 3. Individual summarization batch: each article/newsletter summarized to ~200 words via Haiku Batch API
 4. Final digest batch: all summaries sent to Haiku with the editor system prompt → categorized markdown digest

@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 from src.checkpoint import load_checkpoint, save_checkpoint
 from src.fetchers.rss import fetch_rss_articles, fetch_article_body
+from src.fetchers.anthropic_blog import fetch_anthropic_blog_posts
 from src.fetchers.gmail import fetch_gmail_newsletters
 from src.fetchers.twitter import fetch_tweets
 from src.summarizer import (
@@ -53,6 +54,21 @@ def run_digest(
         )
     except Exception:
         logger.exception("RSS fetcher failed")
+
+    if not arxiv_only:
+        logger.info("Fetching Anthropic blog posts via web search...")
+        start = time.time()
+        try:
+            blog_posts = fetch_anthropic_blog_posts(hours=hours)
+            if blog_posts:
+                rss_articles.setdefault("anthropic", []).extend(blog_posts)
+            logger.info(
+                "Anthropic blog: %d new posts (%.1fs)",
+                len(blog_posts),
+                time.time() - start,
+            )
+        except Exception:
+            logger.exception("Anthropic blog fetcher failed")
 
     if not rss_only and not arxiv_only:
         logger.info("Fetching Gmail newsletters...")

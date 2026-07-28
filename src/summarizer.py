@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 
 import anthropic
@@ -54,6 +55,7 @@ Group papers thematically — use only sections where you have papers:
 Rules:
 - Each paper: title as a clickable link [Title](url), then 2-3 sentences — what it does, its key contribution, and why it matters for agent/LLM builders
 - Skip papers not meaningfully relevant to agent systems even if they passed keyword filtering
+- Coding-related papers (the coding use case, coding evaluations, coding-related models, and coding research) are curated in a separate section above this digest — do not create a coding section here
 - If a section would have fewer than 2 papers, fold them into the closest related section
 - No filler — shorter is better than padding
 - Professional, direct tone
@@ -91,6 +93,32 @@ RSS_SUMMARY_PROMPT = (
     "Source: {source_label} ({company})\n"
     "Link: {link}\n\n"
     "{body_text}"
+)
+
+CODING_SECTION_HEADER = "## Coding & Code Intelligence"
+
+# Keywords marking an arXiv paper as coding-related: the coding use case,
+# coding evaluations/benchmarks, coding-related models, or coding research.
+CODING_KEYWORDS = [
+    "code",
+    "codes",
+    "coding",
+    "coder",
+    "programming",
+    "program synthesis",
+    "software engineering",
+    "software development",
+    "compiler",
+    "debugging",
+    "copilot",
+    "github",
+    "swe-bench",
+    "swe-agent",
+]
+
+_CODING_PATTERN = re.compile(
+    r"\b(?:" + "|".join(re.escape(kw) for kw in CODING_KEYWORDS) + r")\b",
+    re.IGNORECASE,
 )
 
 
@@ -192,11 +220,60 @@ def summarize_content(
     raise RuntimeError("Digest batch failed")
 
 
+def _is_coding_related(article: dict) -> bool:
+    """Return True if an arXiv paper is coding-related.
+
+    Covers the coding use case, coding evaluations/benchmarks, coding-related
+    models, and coding-related research, matched on the title and abstract.
+    """
+    text = f"{article.get('title', '')}\n{article.get('summary', '')}"
+    return bool(_CODING_PATTERN.search(text))
+
+
+def _format_coding_section(
+    articles: list[dict],
+    summaries: dict[str, str] | None = None,
+) -> str:
+    """Build the markdown section that surfaces coding-related papers up front."""
+    lines = [CODING_SECTION_HEADER, ""]
+    for a in articles:
+        summary = (summaries or {}).get(a["link"], a.get("summary", ""))
+        entry = f"- **[{a['title']}]({a['link']})**"
+        if summary:
+            entry += f" — {summary}"
+        lines.append(entry)
+    return "\n".join(lines)
+
+
 def summarize_arxiv_content(
     arxiv_articles: list[dict],
     arxiv_summaries: dict[str, str] | None = None,
 ) -> str:
     load_dotenv()
+
+    # Coding-related papers lead the email in their own section; the rest are
+    # grouped thematically by the digest batch below.
+    coding_articles = [a for a in arxiv_articles if _is_coding_related(a)]
+    other_articles = [a for a in arxiv_articles if not _is_coding_related(a)]
+    if coding_articles:
+        logger.info(
+            "arXiv digest: %d of %d papers are coding-related",
+            len(coding_articles),
+            len(arxiv_articles),
+        )
+
+    sections = []
+    if coding_articles:
+        sections.append(_format_coding_section(coding_articles, arxiv_summaries))
+    if other_articles:
+        sections.append(_run_arxiv_digest_batch(other_articles, arxiv_summaries))
+    return "\n\n".join(sections)
+
+
+def _run_arxiv_digest_batch(
+    arxiv_articles: list[dict],
+    arxiv_summaries: dict[str, str] | None = None,
+) -> str:
     client = anthropic.Anthropic()
 
     parts = []

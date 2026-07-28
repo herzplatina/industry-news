@@ -6,7 +6,7 @@ Runs on GitHub Actions at 7 AM PT. Each run deduplicates against a checkpoint so
 
 ## How it works
 
-1. **Fetch** — RSS feeds and scraped blog pages (no RSS), Gmail newsletters from an allowlist of senders, and tweets from a list of accounts
+1. **Fetch** — RSS feeds and scraped blog pages (no RSS), Anthropic company blog posts discovered via web search (no RSS), Gmail newsletters from an allowlist of senders, and tweets from a list of accounts
 2. **Summarize** — each article and newsletter is individually summarized to ~200 words via Claude Haiku (Batch API)
 3. **Digest** — all summaries are sent to Claude Haiku with an editor system prompt that produces a categorized markdown digest
 4. **Email** — the digest is rendered to HTML and sent via Gmail SMTP; an HTML preview is uploaded as a GitHub Actions artifact
