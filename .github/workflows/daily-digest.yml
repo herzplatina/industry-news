@@ -2,13 +2,13 @@ name: Daily Industry Digest
 
 on:
   schedule:
-    - cron: '0 14 * * *'  # 7 AM PT (UTC-7)
+    - cron: "0 14 * * *" # 7 AM PT (UTC-7)
   workflow_dispatch:
     inputs:
       extra_args:
-        description: 'Extra CLI args (e.g. --arxiv-only --skip-twitter --dry-run)'
+        description: "Extra CLI args (e.g. --arxiv-only --skip-twitter --dry-run)"
         required: false
-        default: ''
+        default: ""
 
 jobs:
   send-digest:
@@ -19,8 +19,8 @@ jobs:
 
       - uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
-          cache: 'pip'
+          python-version: "3.12"
+          cache: "pip"
 
       - name: Install dependencies
         run: pip install -r requirements.txt
@@ -31,7 +31,7 @@ jobs:
           echo '${{ secrets.GOOGLE_TOKEN_JSON }}' > token.json
 
       - name: Restore checkpoint
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: data/checkpoint.json
           key: digest-checkpoint-
@@ -48,7 +48,7 @@ jobs:
         run: python -m src.main --hours 36 ${{ github.event.inputs.extra_args }}
 
       - name: Save checkpoint
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         if: always()
         with:
           path: data/checkpoint.json
@@ -56,7 +56,7 @@ jobs:
 
       - name: Upload digest artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: digest-previews
           path: |
