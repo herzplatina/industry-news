@@ -11,6 +11,7 @@ import yaml
 from bs4 import BeautifulSoup
 
 from src.checkpoint import load_checkpoint, save_checkpoint
+from src.fetchers.web_search import fetch_web_search_articles
 
 logger = logging.getLogger(__name__)
 
@@ -400,6 +401,24 @@ def fetch_rss_articles(hours: int = 24) -> dict[str, list[dict]]:
             time.sleep(FEED_REQUEST_DELAY_SECS)
         if articles:
             results[company] = articles
+            all_links.extend(a["link"] for a in articles)
+
+    for company, searches in config.get("web_search", {}).items():
+        articles = []
+        for search_info in searches:
+            new = fetch_web_search_articles(
+                query=search_info["query"],
+                label=search_info["label"],
+                url_match=search_info["url_match"],
+                prev_links=prev_links,
+            )
+            articles.extend(new)
+            time.sleep(FEED_REQUEST_DELAY_SECS)
+        if articles:
+            if company in results:
+                results[company].extend(articles)
+            else:
+                results[company] = articles
             all_links.extend(a["link"] for a in articles)
 
     merged_links = list(prev_links | {link.rstrip("/") for link in all_links})

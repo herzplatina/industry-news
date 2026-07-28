@@ -75,3 +75,10 @@ scrape:
       label: "a16z Blog"
       path_match: "a16z.com/"
       min_title_length: 30
+
+# Sources discovered via web search (no direct RSS feed available)
+web_search:
+  anthropic:
+    - query: "site:anthropic.com/company"
+      label: "Anthropic Company Blog"
+      url_match: "anthropic.com/company/"

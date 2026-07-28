@@ -40,7 +40,12 @@ Rules:
 
 ARXIV_DIGEST_SYSTEM_PROMPT = """You are an AI research curator for engineers building LLM agent systems, orchestration frameworks, and agent harnesses. Given today's arXiv papers, produce a concise research digest.
 
+Papers whose titles are prefixed with [CODING] are pre-classified as coding-relevant. They MUST appear in the first section below.
+
 Group papers thematically — use only sections where you have papers:
+
+## Coding & Software Engineering
+Papers related to code generation, program synthesis, coding evaluations/benchmarks, software engineering with AI, code understanding, debugging, repository-level tasks, or developer tools. This section MUST appear first whenever coding-related papers are present. Never fold these papers into other sections.
 
 ## Agent Architectures & Frameworks
 ## Multi-Agent Systems & Collaboration
@@ -54,7 +59,7 @@ Group papers thematically — use only sections where you have papers:
 Rules:
 - Each paper: title as a clickable link [Title](url), then 2-3 sentences — what it does, its key contribution, and why it matters for agent/LLM builders
 - Skip papers not meaningfully relevant to agent systems even if they passed keyword filtering
-- If a section would have fewer than 2 papers, fold them into the closest related section
+- If a section would have fewer than 2 papers, fold them into the closest related section — but never fold coding papers out of the Coding section
 - No filler — shorter is better than padding
 - Professional, direct tone
 """
@@ -82,6 +87,55 @@ ARXIV_SUMMARY_PROMPT = (
     "Link: {link}\n\n"
     "{abstract}"
 )
+
+_CODING_KEYWORDS = [
+    "code generation",
+    "code synthesis",
+    "program synthesis",
+    "software engineering",
+    "coding",
+    "code completion",
+    "code review",
+    "debugging",
+    "code repair",
+    "program repair",
+    "code understanding",
+    "code search",
+    "code summarization",
+    "code translation",
+    "developer tool",
+    "programming",
+    "swe-bench",
+    "humaneval",
+    "mbpp",
+    "codecontests",
+    "code benchmark",
+    "code evaluation",
+    "code model",
+    "codegen",
+    "copilot",
+    "code llm",
+    "code agent",
+    "pull request",
+    "refactor",
+    "test generation",
+    "unit test",
+    "software development",
+    "source code",
+    "static analysis",
+    "code fix",
+    "automated program",
+    "code edit",
+    "repository-level",
+    "repo-level",
+]
+
+
+def _is_coding_related(title: str, summary: str) -> bool:
+    """Return True if a paper is related to coding based on title and summary."""
+    combined = (title + " " + summary).lower()
+    return any(kw in combined for kw in _CODING_KEYWORDS)
+
 
 RSS_SUMMARY_PROMPT = (
     "Summarize this article in approximately 200 words. "
@@ -201,9 +255,11 @@ def summarize_arxiv_content(
 
     parts = []
     for a in arxiv_articles:
-        parts.append(f"Title: {a['title']}")
-        parts.append(f"Link: {a['link']}")
+        title = a["title"]
         summary = (arxiv_summaries or {}).get(a["link"], a.get("summary", ""))
+        coding_tag = "[CODING] " if _is_coding_related(title, summary) else ""
+        parts.append(f"Title: {coding_tag}{title}")
+        parts.append(f"Link: {a['link']}")
         if summary:
             parts.append(f"Summary: {summary}")
         parts.append("")
