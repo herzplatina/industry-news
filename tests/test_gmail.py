@@ -9,6 +9,7 @@ def _b64(text: str) -> str:
 
 # --- _build_query ---
 
+
 def test_build_query_includes_email():
     senders = [{"email": "news@example.com", "name": "Example"}]
     query = _build_query(senders, hours=24)
@@ -32,6 +33,7 @@ def test_build_query_sub_day_hours_clamp_to_one_day():
 
 
 # --- _decode_body ---
+
 
 def test_decode_body_plain_text():
     payload = {"mimeType": "text/plain", "body": {"data": _b64("Hello newsletter")}}
@@ -68,6 +70,7 @@ def test_decode_body_empty_payload():
 
 # --- _extract_urls ---
 
+
 def test_extract_urls_returns_article_link():
     html = '<a href="https://example.com/article">Read more</a>'
     assert "https://example.com/article" in _extract_urls(html)
@@ -97,6 +100,7 @@ def test_extract_urls_skips_non_http():
 
 
 # --- _clean_body ---
+
 
 def test_clean_body_removes_view_on_web_header():
     text = "View this post on the web at https://substack.com/p/example\nActual content"
