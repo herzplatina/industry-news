@@ -17,15 +17,14 @@ Runs on GitHub Actions at 7 AM PT. Each run deduplicates against a checkpoint so
 
 Add the following secrets to your repository (`Settings → Secrets and variables → Actions`):
 
-| Secret                    | Description                                                              |
-| ------------------------- | ------------------------------------------------------------------------ |
-| `ANTHROPIC_API_KEY`       | Claude API key                                                           |
-| `GMAIL_SENDER_EMAIL`      | Gmail address used to send the digest                                    |
-| `GMAIL_APP_PASSWORD`      | [Gmail App Password](https://myaccount.google.com/apppasswords) for SMTP |
-| `DIGEST_RECIPIENT_EMAIL`  | Address to receive the digest                                            |
-| `TWITTER_BEARER_TOKEN`    | Twitter API v2 Bearer Token                                              |
-| `GOOGLE_CREDENTIALS_JSON` | Contents of `credentials.json` from Google Cloud Console                 |
-| `GOOGLE_TOKEN_JSON`       | Contents of `token.json` (generated on first local OAuth run)            |
+| Secret                    | Description                                                                                                     |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY`       | Claude API key                                                                                                  |
+| `GMAIL_SENDER_EMAIL`      | Optional From address for the digest (defaults to the OAuth account)                                            |
+| `DIGEST_RECIPIENT_EMAIL`  | Address to receive the digest                                                                                   |
+| `TWITTER_BEARER_TOKEN`    | Twitter API v2 Bearer Token                                                                                     |
+| `GOOGLE_CREDENTIALS_JSON` | Contents of `credentials.json` from Google Cloud Console                                                        |
+| `GOOGLE_TOKEN_JSON`       | Contents of `token.json` — one OAuth token for Gmail read **and** send (scopes `gmail.readonly` + `gmail.send`) |
 
 The workflow runs daily at 7 AM PT. Trigger it manually anytime from the **Actions** tab.
 

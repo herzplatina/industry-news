@@ -1,6 +1,6 @@
+import base64
 import logging
 import os
-import smtplib
 from datetime import datetime, timezone, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -8,14 +8,15 @@ from pathlib import Path
 
 import markdown
 from dotenv import load_dotenv
+from googleapiclient.discovery import build
 from jinja2 import Environment, FileSystemLoader
 from markupsafe import Markup
+
+from src.gmail_auth import get_credentials
 
 logger = logging.getLogger(__name__)
 
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-SMTP_HOST = "smtp.gmail.com"
-SMTP_PORT = 587
 _PT = timezone(timedelta(hours=-7))
 
 
@@ -47,21 +48,21 @@ def _prepare_and_send(
         logger.info("Dry run: HTML written to %s", preview_path)
         return True
 
-    sender = os.environ["GMAIL_SENDER_EMAIL"]
-    password = os.environ["GMAIL_APP_PASSWORD"]
     recipient = os.environ["DIGEST_RECIPIENT_EMAIL"]
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = sender
     msg["To"] = recipient
+    sender = os.environ.get("GMAIL_SENDER_EMAIL")
+    if sender:
+        msg["From"] = sender
     msg.attach(MIMEText(full_markdown, "plain"))
     msg.attach(MIMEText(html, "html"))
 
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-        server.starttls()
-        server.login(sender, password)
-        server.send_message(msg)
+    # Send via the Gmail API using the same OAuth credential used for reading.
+    service = build("gmail", "v1", credentials=get_credentials())
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+    service.users().messages().send(userId="me", body={"raw": raw}).execute()
 
     logger.info("Sent '%s' to %s", subject, recipient)
     return True

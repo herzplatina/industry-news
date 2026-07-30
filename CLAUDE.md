@@ -35,10 +35,10 @@ python -m tests.test_emailer --dry-run  # renders HTML preview, no email sent
 Required env vars (put in `.env` for local use):
 
 - `ANTHROPIC_API_KEY` — for summarization
-- `GMAIL_SENDER_EMAIL`, `GMAIL_APP_PASSWORD`, `DIGEST_RECIPIENT_EMAIL` — for sending email
+- `DIGEST_RECIPIENT_EMAIL` — where the digest is sent; `GMAIL_SENDER_EMAIL` — optional From header
 - `TWITTER_BEARER_TOKEN` — for Twitter fetching
 
-Gmail OAuth additionally requires `credentials.json` and `token.json` at the project root. On first local run it opens a browser to authorize; in CI these are written from GitHub Secrets.
+Gmail reading **and** sending use one OAuth credential (`credentials.json` + `token.json` at the project root; scopes `gmail.readonly` + `gmail.send`, defined in `src/gmail_auth.py`). No SMTP app password is needed. On first local run it opens a browser to authorize; in CI these are written from GitHub Secrets. If you previously authorized read-only, delete `token.json` and re-run so the token picks up the `gmail.send` scope.
 
 ## Architecture
 

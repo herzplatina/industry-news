@@ -6,18 +6,12 @@ from urllib.parse import urlparse, parse_qs, unquote
 
 import yaml
 from bs4 import BeautifulSoup
-from dotenv import load_dotenv
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
+
+from src.gmail_auth import get_gmail_service
 
 logger = logging.getLogger(__name__)
 
-SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-CREDENTIALS_PATH = PROJECT_ROOT / "credentials.json"
-TOKEN_PATH = PROJECT_ROOT / "token.json"
 SENDERS_PATH = PROJECT_ROOT / "config" / "senders.yaml"
 GMAIL_MAX_RESULTS = 50
 MAX_NEWSLETTER_URLS = 30
@@ -26,32 +20,6 @@ MAX_NEWSLETTER_URLS = 30
 def _load_senders() -> list[dict]:
     with open(SENDERS_PATH) as f:
         return yaml.safe_load(f)["senders"]
-
-
-def _get_gmail_service():
-    load_dotenv()
-    creds = None
-
-    if TOKEN_PATH.exists():
-        creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), SCOPES)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            if not CREDENTIALS_PATH.exists():
-                raise FileNotFoundError(
-                    f"credentials.json not found at {CREDENTIALS_PATH}. "
-                    "Download it from Google Cloud Console."
-                )
-            flow = InstalledAppFlow.from_client_secrets_file(
-                str(CREDENTIALS_PATH), SCOPES
-            )
-            creds = flow.run_local_server(port=0)
-
-        TOKEN_PATH.write_text(creds.to_json())
-
-    return build("gmail", "v1", credentials=creds)
 
 
 def _build_query(senders: list[dict], hours: int) -> str:
@@ -159,7 +127,7 @@ def fetch_gmail_newsletters(
     prev_message_ids: set[str] | None = None,
 ) -> tuple[list[dict], list[str]]:
     senders = _load_senders()
-    service = _get_gmail_service()
+    service = get_gmail_service()
     query = _build_query(senders, hours)
     logger.info("Gmail query: %s", query)
 
