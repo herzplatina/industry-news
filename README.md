@@ -1,6 +1,6 @@
 # Industry News Digest
 
-Automated daily digest of AI/tech industry news delivered to your inbox. Fetches content from RSS feeds, Gmail newsletters, and Twitter, summarizes everything with Claude Haiku, and emails an HTML digest every morning.
+Automated daily digest of AI/tech industry news delivered to your inbox. Fetches content from RSS feeds and Gmail newsletters, summarizes everything with Claude Haiku, and emails an HTML digest every morning. An optional Twitter digest is available too (off by default; opt in with `--twitter`).
 
 Runs on GitHub Actions at 7 AM PT. Each run deduplicates against a checkpoint so you never see the same article twice.
 

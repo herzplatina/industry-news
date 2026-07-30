@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this does
 
-Daily pipeline that fetches AI/tech industry news from RSS feeds, Gmail newsletters, and Twitter, summarizes everything via Claude Haiku (Batch API), then emails an HTML digest. Runs on GitHub Actions at 7 AM PT.
+Daily pipeline that fetches AI/tech industry news from RSS feeds and Gmail newsletters, summarizes everything via Claude Haiku (Batch API), then emails an HTML digest. Runs on GitHub Actions at 7 AM PT. A separate Twitter digest also exists but is off by default (opt in with `--twitter`).
 
 ## Running locally
 

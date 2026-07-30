@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       extra_args:
-        description: "Extra CLI args (e.g. --arxiv-only --skip-twitter --dry-run)"
+        description: "Extra CLI args (e.g. --arxiv-only --twitter --dry-run)"
         required: false
         default: ""
 

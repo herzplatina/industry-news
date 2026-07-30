@@ -341,7 +341,9 @@ def main() -> None:
         help="Print raw items without summarizing",
     )
     parser.add_argument(
-        "--skip-twitter", action="store_true", help="Skip Twitter digest"
+        "--twitter",
+        action="store_true",
+        help="Send the Twitter digest (off by default)",
     )
     parser.add_argument(
         "--arxiv-only",
@@ -370,7 +372,7 @@ def main() -> None:
         logger.exception("Digest pipeline failed")
         sys.exit(1)
 
-    if not args.skip_twitter:
+    if args.twitter:
         try:
             run_twitter_digest(hours=args.hours, dry_run=args.dry_run)
         except Exception:
