@@ -26,6 +26,7 @@ _NEWSLETTERS = [
 
 # --- _format_rss_content ---
 
+
 def test_format_rss_includes_title():
     assert "Claude 4 Released" in _format_rss_content(_RSS)
 
@@ -53,6 +54,7 @@ def test_format_rss_empty_returns_empty_string():
 
 
 # --- _format_newsletter_content ---
+
 
 def test_format_newsletter_includes_subject():
     assert "TLDR AI: Big week" in _format_newsletter_content(_NEWSLETTERS)
