@@ -10,6 +10,7 @@ from src.checkpoint import load_checkpoint, save_checkpoint
 from src.fetchers.rss import fetch_rss_articles, fetch_article_body
 from src.fetchers.gmail import fetch_gmail_newsletters
 from src.fetchers.twitter import fetch_tweets
+from src.fetchers.anthropic_blog import fetch_anthropic_blog
 from src.summarizer import (
     summarize_content,
     summarize_arxiv_content,
@@ -53,6 +54,29 @@ def run_digest(
         )
     except Exception:
         logger.exception("RSS fetcher failed")
+
+    if not arxiv_only and not skip_summarize:
+        logger.info("Fetching Anthropic blog via web search...")
+        start = time.time()
+        try:
+            checkpoint = load_checkpoint()
+            prev_links = {link.rstrip("/") for link in checkpoint.get("links", [])}
+            blog_articles, blog_links = fetch_anthropic_blog(
+                hours=hours, prev_links=prev_links
+            )
+            if blog_articles:
+                rss_articles["anthropic_blog"] = blog_articles
+                checkpoint["links"] = list(
+                    prev_links | {link.rstrip("/") for link in blog_links}
+                )
+                save_checkpoint(checkpoint)
+            logger.info(
+                "Anthropic blog: %d new posts (%.1fs)",
+                len(blog_articles),
+                time.time() - start,
+            )
+        except Exception:
+            logger.exception("Anthropic blog fetcher failed")
 
     if not rss_only and not arxiv_only:
         logger.info("Fetching Gmail newsletters...")

@@ -33,6 +33,7 @@ python -m tests.test_emailer --dry-run  # renders HTML preview, no email sent
 ```
 
 Required env vars (put in `.env` for local use):
+
 - `ANTHROPIC_API_KEY` — for summarization
 - `GMAIL_SENDER_EMAIL`, `GMAIL_APP_PASSWORD`, `DIGEST_RECIPIENT_EMAIL` — for sending email
 - `TWITTER_BEARER_TOKEN` — for Twitter fetching
@@ -50,6 +51,7 @@ src/fetchers/
   rss.py             — fetches RSS feeds + scrapes blog pages without RSS
   gmail.py           — reads newsletters from Gmail via Google API
   twitter.py         — fetches tweets via Twitter API v2
+  anthropic_blog.py  — finds recent anthropic.com posts via the Claude web search tool
 config/
   feeds.yaml         — RSS feed URLs and blog scrape targets per company
   senders.yaml       — Gmail newsletter sender allowlist
@@ -59,17 +61,22 @@ templates/
 ```
 
 **Pipeline flow:**
-1. RSS + scrape fetcher: fetches up to 10 articles per feed, filters by `--hours` cutoff, skips links already in checkpoint
-2. Gmail fetcher: queries allowed senders, decodes MIME, extracts article URLs from HTML
-3. Individual summarization batch: each article/newsletter summarized to ~200 words via Haiku Batch API
-4. Final digest batch: all summaries sent to Haiku with the editor system prompt → categorized markdown digest
-5. Email: markdown rendered to HTML via Jinja2 template, sent via Gmail SMTP; HTML preview also saved to repo root for GH Actions artifact upload
 
-**Checkpoint (`data/checkpoint.json`):** Tracks seen RSS article links, newsletter message IDs, and tweet URLs to deduplicate across runs. In CI this is persisted via `actions/cache`. The `data/` directory is gitignored.
+1. RSS + scrape fetcher: fetches up to 10 articles per feed, filters by `--hours` cutoff, skips links already in checkpoint
+2. Anthropic blog fetcher: uses the Claude web search tool to find recent anthropic.com posts, deduped against the shared checkpoint links (so it never repeats a post already surfaced by the Anthropic RSS feed or a previous day's email)
+3. Gmail fetcher: queries allowed senders, decodes MIME, extracts article URLs from HTML
+4. Individual summarization batch: each article/newsletter summarized to ~200 words via Haiku Batch API
+5. Final digest batch: all summaries sent to Haiku with the editor system prompt → categorized markdown digest
+6. Email: markdown rendered to HTML via Jinja2 template, sent via Gmail SMTP; HTML preview also saved to repo root for GH Actions artifact upload
+
+**arXiv digest:** research papers go out as a separate email. Coding-related papers (code generation, coding evaluations/benchmarks, coding models, coding agents — classified by keyword in `summarizer.partition_coding_papers`) are pulled into a dedicated section at the very top of that email; the remaining papers form the thematic digest below.
+
+**Checkpoint (`data/checkpoint.json`):** Tracks seen RSS/blog article links, newsletter message IDs, and tweet URLs to deduplicate across runs. In CI this is persisted via `actions/cache`. The `data/` directory is gitignored.
 
 ## Config files
 
 `config/feeds.yaml` has two top-level keys:
+
 - `feeds` — standard RSS feeds, keyed by company name, each with `url` and `label`
 - `scrape` — HTML scraping targets with optional `path_match` and `min_title_length` overrides
 
