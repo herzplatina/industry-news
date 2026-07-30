@@ -1,0 +1,18 @@
+version: 2
+updates:
+  # Keep GitHub Actions on supported runtimes automatically, so runner
+  # deprecations (e.g. Node.js 20 → 24) surface as PRs instead of warnings.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+
+  # Keep Python dependencies patched.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps"
