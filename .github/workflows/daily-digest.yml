@@ -31,7 +31,7 @@ jobs:
           echo '${{ secrets.GOOGLE_TOKEN_JSON }}' > token.json
 
       - name: Restore checkpoint
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: data/checkpoint.json
           key: digest-checkpoint-
@@ -47,7 +47,7 @@ jobs:
         run: python -m src.main --hours 36 ${{ github.event.inputs.extra_args }}
 
       - name: Save checkpoint
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         if: always()
         with:
           path: data/checkpoint.json
