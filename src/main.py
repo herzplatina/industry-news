@@ -2,6 +2,7 @@ import argparse
 import logging
 import sys
 import time
+from datetime import datetime, timezone
 
 import anthropic
 from dotenv import load_dotenv
@@ -29,6 +30,22 @@ logger = logging.getLogger(__name__)
 NEWSLETTER_FALLBACK_CHARS = 2_000  # cap for fallback when summarization fails
 
 
+def _mark_seen(links: set[str], message_ids: set[str]) -> None:
+    """Record items as seen so later runs skip them.
+
+    Only called after a run completes, so a run that fails partway (e.g. the
+    summarization API is down) doesn't hide its items from the next run.
+    """
+    checkpoint = load_checkpoint()
+    prev_links = {link.rstrip("/") for link in checkpoint.get("links", [])}
+    checkpoint["links"] = list(prev_links | {link.rstrip("/") for link in links})
+    checkpoint["newsletter_message_ids"] = list(
+        set(checkpoint.get("newsletter_message_ids", [])) | message_ids
+    )
+    checkpoint["last_run"] = datetime.now(timezone.utc).isoformat()
+    save_checkpoint(checkpoint)
+
+
 def run_digest(
     hours: int = 24,
     dry_run: bool = False,
@@ -36,6 +53,30 @@ def run_digest(
     skip_summarize: bool = False,
     arxiv_only: bool = False,
 ) -> None:
+    seen_links: set[str] = set()
+    seen_message_ids: set[str] = set()
+    _run_digest(
+        hours,
+        dry_run,
+        rss_only,
+        skip_summarize,
+        arxiv_only,
+        seen_links,
+        seen_message_ids,
+    )
+    _mark_seen(seen_links, seen_message_ids)
+
+
+def _run_digest(
+    hours: int,
+    dry_run: bool,
+    rss_only: bool,
+    skip_summarize: bool,
+    arxiv_only: bool,
+    seen_links: set[str],
+    seen_message_ids: set[str],
+) -> None:
+    """Fetch, summarize and send; fills seen_links/seen_message_ids as it fetches."""
     rss_articles = {}
     newsletters = []
 
@@ -43,6 +84,13 @@ def run_digest(
     start = time.time()
     try:
         rss_articles = fetch_rss_articles(hours=hours)
+        # arXiv links are excluded from the checkpoint — the time cutoff dedupes them
+        seen_links.update(
+            a["link"]
+            for company, articles in rss_articles.items()
+            if company != "arxiv"
+            for a in articles
+        )
         if arxiv_only:
             rss_articles = {k: v for k, v in rss_articles.items() if k == "arxiv"}
         rss_count = sum(len(v) for v in rss_articles.values())
@@ -59,17 +107,18 @@ def run_digest(
         logger.info("Fetching Anthropic blog via web search...")
         start = time.time()
         try:
-            checkpoint = load_checkpoint()
-            prev_links = {link.rstrip("/") for link in checkpoint.get("links", [])}
+            # Include this run's RSS links so a post the Anthropic RSS feed just
+            # surfaced isn't fetched a second time via web search.
+            prev_links = {
+                link.rstrip("/")
+                for link in load_checkpoint().get("links", []) + list(seen_links)
+            }
             blog_articles, blog_links = fetch_anthropic_blog(
                 hours=hours, prev_links=prev_links
             )
             if blog_articles:
                 rss_articles["anthropic_blog"] = blog_articles
-                checkpoint["links"] = list(
-                    prev_links | {link.rstrip("/") for link in blog_links}
-                )
-                save_checkpoint(checkpoint)
+                seen_links.update(blog_links)
             logger.info(
                 "Anthropic blog: %d new posts (%.1fs)",
                 len(blog_articles),
@@ -82,14 +131,11 @@ def run_digest(
         logger.info("Fetching Gmail newsletters...")
         start = time.time()
         try:
-            checkpoint = load_checkpoint()
-            prev_message_ids = set(checkpoint.get("newsletter_message_ids", []))
+            prev_message_ids = set(load_checkpoint().get("newsletter_message_ids", []))
             newsletters, new_message_ids = fetch_gmail_newsletters(
                 hours=hours, prev_message_ids=prev_message_ids
             )
-            merged_ids = list(prev_message_ids | set(new_message_ids))
-            checkpoint["newsletter_message_ids"] = merged_ids
-            save_checkpoint(checkpoint)
+            seen_message_ids.update(new_message_ids)
             logger.info(
                 "Gmail: %d newsletters (%.1fs)", len(newsletters), time.time() - start
             )

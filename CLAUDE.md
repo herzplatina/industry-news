@@ -71,7 +71,7 @@ templates/
 
 **arXiv digest:** research papers go out as a separate email. Coding-related papers (code generation, coding evaluations/benchmarks, coding models, coding agents — classified by keyword in `summarizer.partition_coding_papers`) are pulled into a dedicated section at the very top of that email; the remaining papers form the thematic digest below.
 
-**Checkpoint (`data/checkpoint.json`):** Tracks seen RSS/blog article links, newsletter message IDs, and tweet URLs to deduplicate across runs. In CI this is persisted via `actions/cache`. The `data/` directory is gitignored.
+**Checkpoint (`data/checkpoint.json`):** Tracks seen RSS/blog article links, newsletter message IDs, and tweet URLs to deduplicate across runs. Fetchers only read it; `run_digest` writes the new links/message IDs once the run completes, so a failed run (e.g. API out of credits) doesn't mark its items as sent. In CI this is persisted via `actions/cache`. The `data/` directory is gitignored.
 
 ## Config files
 

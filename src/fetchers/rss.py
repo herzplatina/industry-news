@@ -10,7 +10,7 @@ import requests
 import yaml
 from bs4 import BeautifulSoup
 
-from src.checkpoint import load_checkpoint, save_checkpoint
+from src.checkpoint import load_checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -344,11 +344,9 @@ def fetch_rss_articles(hours: int = 24) -> dict[str, list[dict]]:
     config = _load_config()
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
 
-    checkpoint = load_checkpoint()
-    prev_links = {link.rstrip("/") for link in checkpoint.get("links", [])}
+    prev_links = {link.rstrip("/") for link in load_checkpoint().get("links", [])}
 
     results = {}
-    all_links = []
 
     for company, feeds in config.get("feeds", {}).items():
         articles = []
@@ -360,7 +358,6 @@ def fetch_rss_articles(hours: int = 24) -> dict[str, list[dict]]:
             time.sleep(FEED_REQUEST_DELAY_SECS)
         if articles:
             results[company] = articles
-            all_links.extend(a["link"] for a in articles)
 
     arxiv_config = config.get("arxiv", {})
     if arxiv_config:
@@ -400,11 +397,5 @@ def fetch_rss_articles(hours: int = 24) -> dict[str, list[dict]]:
             time.sleep(FEED_REQUEST_DELAY_SECS)
         if articles:
             results[company] = articles
-            all_links.extend(a["link"] for a in articles)
-
-    merged_links = list(prev_links | {link.rstrip("/") for link in all_links})
-    checkpoint["links"] = merged_links
-    checkpoint["last_run"] = datetime.now(timezone.utc).isoformat()
-    save_checkpoint(checkpoint)
 
     return results
