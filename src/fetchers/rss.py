@@ -10,7 +10,6 @@ import requests
 import yaml
 from bs4 import BeautifulSoup
 
-from src.checkpoint import load_checkpoint, save_checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -340,15 +339,19 @@ def _scrape_blog_page(
     return articles
 
 
-def fetch_rss_articles(hours: int = 24) -> dict[str, list[dict]]:
+def fetch_rss_articles(
+    hours: int = 24, prev_links: set[str] | None = None
+) -> tuple[dict[str, list[dict]], list[str]]:
+    """Return (new articles keyed by company, their links to mark seen).
+
+    prev_links holds already-sent links (no trailing slash); those are skipped.
+    """
     config = _load_config()
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
-
-    checkpoint = load_checkpoint()
-    prev_links = {link.rstrip("/") for link in checkpoint.get("links", [])}
+    prev_links = prev_links or set()
 
     results = {}
-    all_links = []
+    new_links = []
 
     for company, feeds in config.get("feeds", {}).items():
         articles = []
@@ -360,7 +363,7 @@ def fetch_rss_articles(hours: int = 24) -> dict[str, list[dict]]:
             time.sleep(FEED_REQUEST_DELAY_SECS)
         if articles:
             results[company] = articles
-            all_links.extend(a["link"] for a in articles)
+            new_links.extend(a["link"] for a in articles)
 
     arxiv_config = config.get("arxiv", {})
     if arxiv_config:
@@ -400,11 +403,6 @@ def fetch_rss_articles(hours: int = 24) -> dict[str, list[dict]]:
             time.sleep(FEED_REQUEST_DELAY_SECS)
         if articles:
             results[company] = articles
-            all_links.extend(a["link"] for a in articles)
+            new_links.extend(a["link"] for a in articles)
 
-    merged_links = list(prev_links | {link.rstrip("/") for link in all_links})
-    checkpoint["links"] = merged_links
-    checkpoint["last_run"] = datetime.now(timezone.utc).isoformat()
-    save_checkpoint(checkpoint)
-
-    return results
+    return results, new_links

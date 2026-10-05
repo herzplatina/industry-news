@@ -36,15 +36,53 @@ def run_digest(
     skip_summarize: bool = False,
     arxiv_only: bool = False,
 ) -> None:
+    checkpoint = load_checkpoint()
+    # Fetchers skip what's in these sets and the fetch step adds what they find.
+    # They're only saved once the run completes, so a run that fails partway
+    # (e.g. the summarization API is down) doesn't hide its items from the next.
+    seen_links = {link.rstrip("/") for link in checkpoint.get("links", [])}
+    seen_message_ids = set(checkpoint.get("newsletter_message_ids", []))
+
+    rss_articles, newsletters = _fetch_all(
+        hours=hours,
+        rss_only=rss_only,
+        skip_summarize=skip_summarize,
+        arxiv_only=arxiv_only,
+        seen_links=seen_links,
+        seen_message_ids=seen_message_ids,
+    )
+    _summarize_and_send(
+        rss_articles, newsletters, dry_run=dry_run, skip_summarize=skip_summarize
+    )
+
+    if dry_run or skip_summarize:
+        return  # nothing was emailed, so nothing counts as sent
+    checkpoint["links"] = list(seen_links)
+    checkpoint["newsletter_message_ids"] = list(seen_message_ids)
+    save_checkpoint(checkpoint)
+
+
+def _fetch_all(
+    *,
+    hours: int,
+    rss_only: bool,
+    skip_summarize: bool,
+    arxiv_only: bool,
+    seen_links: set[str],
+    seen_message_ids: set[str],
+) -> tuple[dict[str, list[dict]], list[dict]]:
+    """Fetch unseen items from every source, adding their keys to the seen sets."""
     rss_articles = {}
     newsletters = []
 
     logger.info("Fetching RSS feeds...")
     start = time.time()
     try:
-        rss_articles = fetch_rss_articles(hours=hours)
+        rss_articles, new_links = fetch_rss_articles(hours=hours, prev_links=seen_links)
         if arxiv_only:
             rss_articles = {k: v for k, v in rss_articles.items() if k == "arxiv"}
+        else:
+            seen_links.update(new_links)
         rss_count = sum(len(v) for v in rss_articles.values())
         logger.info(
             "RSS: %d articles from %d sources (%.1fs)",
@@ -59,17 +97,12 @@ def run_digest(
         logger.info("Fetching Anthropic blog via web search...")
         start = time.time()
         try:
-            checkpoint = load_checkpoint()
-            prev_links = {link.rstrip("/") for link in checkpoint.get("links", [])}
             blog_articles, blog_links = fetch_anthropic_blog(
-                hours=hours, prev_links=prev_links
+                hours=hours, prev_links=seen_links
             )
             if blog_articles:
                 rss_articles["anthropic_blog"] = blog_articles
-                checkpoint["links"] = list(
-                    prev_links | {link.rstrip("/") for link in blog_links}
-                )
-                save_checkpoint(checkpoint)
+                seen_links.update(blog_links)
             logger.info(
                 "Anthropic blog: %d new posts (%.1fs)",
                 len(blog_articles),
@@ -82,14 +115,10 @@ def run_digest(
         logger.info("Fetching Gmail newsletters...")
         start = time.time()
         try:
-            checkpoint = load_checkpoint()
-            prev_message_ids = set(checkpoint.get("newsletter_message_ids", []))
             newsletters, new_message_ids = fetch_gmail_newsletters(
-                hours=hours, prev_message_ids=prev_message_ids
+                hours=hours, prev_message_ids=seen_message_ids
             )
-            merged_ids = list(prev_message_ids | set(new_message_ids))
-            checkpoint["newsletter_message_ids"] = merged_ids
-            save_checkpoint(checkpoint)
+            seen_message_ids.update(new_message_ids)
             logger.info(
                 "Gmail: %d newsletters (%.1fs)", len(newsletters), time.time() - start
             )
@@ -100,6 +129,16 @@ def run_digest(
         except Exception:
             logger.exception("Gmail fetcher failed")
 
+    return rss_articles, newsletters
+
+
+def _summarize_and_send(
+    rss_articles: dict[str, list[dict]],
+    newsletters: list[dict],
+    *,
+    dry_run: bool,
+    skip_summarize: bool,
+) -> None:
     total = sum(len(v) for v in rss_articles.values()) + len(newsletters)
     if total == 0:
         logger.info("No new content found. Skipping digest.")
@@ -294,10 +333,6 @@ def run_twitter_digest(hours: int = 36, dry_run: bool = False) -> None:
             filtered[handle] = new_tweets
             new_tweet_urls.extend(t["url"] for t in new_tweets)
 
-    merged_urls = list(prev_tweet_urls | set(new_tweet_urls))
-    checkpoint["tweet_urls"] = merged_urls
-    save_checkpoint(checkpoint)
-
     if not filtered:
         logger.info("No new tweets found. Skipping Twitter digest.")
         return
@@ -324,6 +359,10 @@ def run_twitter_digest(hours: int = 36, dry_run: bool = False) -> None:
     logger.info("Sending Twitter digest email...")
     send_twitter_digest(digest_markdown)
     logger.info("Twitter digest done.")
+
+    # Saved only after sending so a failed run doesn't hide these tweets.
+    checkpoint["tweet_urls"] = list(prev_tweet_urls | set(new_tweet_urls))
+    save_checkpoint(checkpoint)
 
 
 def main() -> None:
